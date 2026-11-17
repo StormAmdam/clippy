@@ -96,7 +96,11 @@ def fetch(url: str, dest: Path, task: Task, label: str) -> Path:
 
 
 def _github(url: str):
-    r = httpx.get(url, timeout=30, follow_redirects=True, headers={"Accept": "application/vnd.github+json"})
+    import os
+    headers = {"Accept": "application/vnd.github+json"}
+    if os.environ.get("GITHUB_TOKEN"):                 # CI machines share IPs and hit the anonymous rate limit
+        headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
+    r = httpx.get(url, timeout=30, follow_redirects=True, headers=headers)
     r.raise_for_status()
     return r.json()
 

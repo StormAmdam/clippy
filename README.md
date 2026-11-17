@@ -37,31 +37,52 @@ and the picture instead.
 
 ## Install
 
-**On Linux,** paste this into a terminal:
+### Windows
+
+1. Download **Clippy-Setup-win64.exe** from the [latest release](https://github.com/StormAmdam/clippy/releases/latest)
+   and run it. No admin rights needed. (Prefer no installer? The portable zip works from any folder.)
+2. Clippy opens in its own window. On **AI & Tools**, press **Set Up Everything**: it downloads the video tools,
+   the speech model and an AI model that fits your PC, or uses Ollama or LM Studio if you already run one.
+3. Paste a YouTube link and press **Make Clips**.
+
+Everything Clippy downloads stays inside its own folder, so uninstalling removes all of it. The uninstaller
+offers to move your finished shorts to `Videos\Clippy` first.
+
+### Linux
 
 ```
 curl -fsSL https://raw.githubusercontent.com/StormAmdam/clippy/main/install.sh | bash
 ```
 
-**On Windows,** Clippy runs inside Ubuntu with WSL, which takes about ten minutes to set up:
-
-1. Right-click **Start**, open **Terminal (Admin)** or **PowerShell (Admin)**, and run `wsl --install`.
-   Restart your PC when it asks.
-2. Ubuntu opens by itself after the restart (or find it in the Start menu). Choose a username and password.
-3. If you have an NVIDIA graphics card, update its normal Windows driver. Don't install a driver inside Ubuntu:
-   WSL uses the Windows one.
-4. In the Ubuntu window, paste the install line from above and press Enter.
-
-The installer puts Clippy in `~/clippy` and walks you through the rest: Python packages, ffmpeg, an emoji font,
-and a local AI that fits your PC (it asks before using your password or downloading a model).
-When it's done, start Clippy with:
-
-```
-clippy web
-```
-
-It opens at <http://localhost:7860>; on Windows, in your normal Windows browser.
+Setup puts Clippy in `~/clippy` and walks you through the rest (Python packages, ffmpeg, an emoji font, and a
+local AI that fits your PC). Then start it with `clippy app` for its own window, or `clippy web` for a browser tab.
 Run the install line again any time to update.
+
+<details>
+<summary><b>Windows with WSL instead</b></summary>
+
+The Linux version also runs inside Ubuntu on Windows:
+
+1. Right-click **Start**, open **Terminal (Admin)**, and run `wsl --install`. Restart when it asks.
+2. Ubuntu opens after the restart. Choose a username and password.
+3. With an NVIDIA card, keep its normal Windows driver up to date; don't install one inside Ubuntu.
+4. In Ubuntu, paste the Linux install line. `clippy web` then opens in your Windows browser.
+</details>
+
+## Choose your AI
+
+The **AI & Tools** page is where you control the AI. Download any of these and switch between them whenever you
+like; the one that fits your PC best is marked. You can also paste a link to any `.gguf` model on Hugging Face.
+
+| Model | Size | Good for |
+|---|---|---|
+| Qwen3.6 35B-A3B | 17.7 GB | Best picks. Runs partly from RAM, so it needs about 24 GB of RAM |
+| Qwen3.5 9B | 5.7 GB | Good picks with an 8 GB graphics card or 16 GB of RAM |
+| Qwen3.5 4B | 2.7 GB | Any PC, even without a graphics card |
+
+Clippy runs the model itself: it starts it when it's time to pick clips, pauses it while Whisper needs the
+graphics card, and frees the memory after 10 minutes without use. Prefer an AI app you already have? Choose
+**Another App** and Clippy uses Ollama, LM Studio, llama.cpp, Jan, KoboldCpp or vLLM (see below).
 
 ## Caption styles
 
@@ -106,7 +127,7 @@ file for posting to TikTok from your phone.
 Already cloned the repo? `bash setup.sh` does the same as the install line. It's safe to run again any time, for
 example to update yt-dlp when YouTube changes something, or to add an AI later: `bash setup.sh --ai ollama`.
 
-## Use your own AI
+## Use an AI app you already have
 
 Clippy needs a local AI model to read the transcript and pick the moments. **It finds one by itself:** whatever
 is running on this PC (or, from WSL, on the Windows side) on these apps' usual ports.

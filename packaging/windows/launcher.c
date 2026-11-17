@@ -20,7 +20,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR args, int show) {
                     L"Clippy", MB_ICONERROR);
         return 1;
     }
-    swprintf(cmd, BIG * 2, L"\"%s\" -m clippy app %s", py, args ? args : L"");
+    swprintf(cmd, BIG * 2, L"\"%s\" -X utf8 -m clippy app %s", py, args ? args : L"");  /* UTF-8 mode: emoji, titles */
+    SetEnvironmentVariableW(L"PYTHONUTF8", L"1");
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
