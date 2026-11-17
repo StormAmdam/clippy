@@ -104,7 +104,7 @@ if ($SmokeTest) {
   Step "Test suite with the bundled Python"
   Run $Py -m pip install --disable-pip-version-check --no-warn-script-location pytest
   Push-Location $Root
-  & $Py -m pytest -q -p no:cacheprovider tests
+  & $Py -X utf8 -m pytest -q -p no:cacheprovider tests   # UTF-8 mode, as the app always runs
   $failed = $LASTEXITCODE
   Pop-Location
   Run $Py -m pip uninstall -y pytest pluggy iniconfig

@@ -34,12 +34,12 @@ RELEASE = ["cudart-llama-b12475-bin-ubuntu-cuda-12.8-x64.tar.gz", "cudart-llama-
 
 def test_llama_build_matches_the_hardware():
     # CUDA 12.x runs on every driver from 525 up, 13.x needs a very new one: always take 12.x plus its runtime
-    assert aisetup.llama_assets(RELEASE, nvidia=True, arch="x86_64", vulkan=False) == [
+    assert aisetup.llama_assets(RELEASE, nvidia=True, arch="x86_64", vulkan=False, system="linux") == [
         "llama-b12475-bin-ubuntu-cuda-12.8-x64.tar.gz", "cudart-llama-b12475-bin-ubuntu-cuda-12.8-x64.tar.gz"]
-    assert aisetup.llama_assets(RELEASE, nvidia=False, arch="x86_64", vulkan=True) == ["llama-b12475-bin-ubuntu-vulkan-x64.tar.gz"]
-    assert aisetup.llama_assets(RELEASE, nvidia=False, arch="x86_64", vulkan=False) == ["llama-b12475-bin-ubuntu-x64.tar.gz"]
-    assert aisetup.llama_assets(RELEASE, nvidia=True, arch="aarch64", vulkan=False) == ["llama-b12475-bin-ubuntu-arm64.tar.gz"]
-    assert aisetup.llama_assets(["nightly-tag.txt"], nvidia=True, arch="x86_64", vulkan=False) == []
+    assert aisetup.llama_assets(RELEASE, nvidia=False, arch="x86_64", vulkan=True, system="linux") == ["llama-b12475-bin-ubuntu-vulkan-x64.tar.gz"]
+    assert aisetup.llama_assets(RELEASE, nvidia=False, arch="x86_64", vulkan=False, system="linux") == ["llama-b12475-bin-ubuntu-x64.tar.gz"]
+    assert aisetup.llama_assets(RELEASE, nvidia=True, arch="aarch64", vulkan=False, system="linux") == ["llama-b12475-bin-ubuntu-arm64.tar.gz"]
+    assert aisetup.llama_assets(["nightly-tag.txt"], nvidia=True, arch="x86_64", vulkan=False, system="linux") == []
 
 
 def test_env_file_tells_the_launcher_what_to_run(tmp_path):
@@ -68,3 +68,12 @@ def test_vulkan_build_only_for_a_real_amd_or_intel_card(tmp_path):
 def test_sizes_read_naturally():
     assert aisetup.human(36_400_000) == "36 MB"
     assert aisetup.human(2_700_000_000) == "2.7 GB"
+
+
+def test_windows_gets_the_windows_builds():
+    names = ["cudart-llama-bin-win-cuda-12.4-x64.zip", "llama-b12478-bin-win-cuda-12.4-x64.zip", "llama-b12478-bin-win-cuda-13.5-x64.zip",
+             "llama-b12478-bin-win-vulkan-x64.zip", "llama-b12478-bin-win-cpu-x64.zip", "llama-b12478-bin-ubuntu-x64.tar.gz"]
+    assert aisetup.llama_assets(names, nvidia=True, arch="AMD64", vulkan=False, system="windows") == [
+        "llama-b12478-bin-win-cuda-12.4-x64.zip", "cudart-llama-bin-win-cuda-12.4-x64.zip"]
+    assert aisetup.llama_assets(names, nvidia=False, arch="AMD64", vulkan=True, system="windows") == ["llama-b12478-bin-win-vulkan-x64.zip"]
+    assert aisetup.llama_assets(names, nvidia=False, arch="AMD64", vulkan=False, system="windows") == ["llama-b12478-bin-win-cpu-x64.zip"]

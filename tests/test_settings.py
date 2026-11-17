@@ -1,3 +1,4 @@
+import sys
 import configparser
 import importlib
 import json
@@ -28,6 +29,7 @@ def test_ui_settings_rejects_unknown_key(tmp_output):
     assert config.load().clips == 4                                   # nothing half-applied
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="start at login uses systemd, which is Linux-only")
 def test_unit_file_runs_clippy_from_its_folder():
     from clippy import autostart
     unit = configparser.ConfigParser(interpolation=None)
@@ -37,6 +39,7 @@ def test_unit_file_runs_clippy_from_its_folder():
     assert unit["Install"]["WantedBy"] == "default.target"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="start at login uses systemd, which is Linux-only")
 def test_unit_file_survives_a_folder_with_spaces_and_percent_signs():
     # after moving PCs the folder can be anywhere, e.g. "~/My Projects/100% Clippy"
     from clippy import autostart
