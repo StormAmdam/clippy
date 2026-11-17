@@ -227,7 +227,7 @@ def test_waiting_for_the_ai_starts_an_installed_one_when_none_is_running(monkeyp
     base, _ = serve(LLAMACPP)
     started = []
 
-    def fake_resolve(cfg, max_age=20):
+    def fake_resolve(cfg, max_age=20, start=False):
         if not started:
             raise RuntimeError("No local AI server found.")
         return llm.probe(base + "/v1")

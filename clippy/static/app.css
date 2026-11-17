@@ -461,3 +461,26 @@ details.more > div { padding: 0 14px 14px; }
   .toasts { left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
 @media (max-width: 520px) { .facts { grid-template-columns: 1fr 1fr; } .fact .v { font-size: 28px; } .steps5 { grid-template-columns: 1fr; } }
+
+/* ── AI & Tools ── */
+.setup-banner { display: flex; align-items: center; gap: 16px; justify-content: space-between; padding: 16px 18px; margin-bottom: 16px;
+  border: 1px solid var(--yellow); border-radius: var(--card); background: var(--yellow-soft); }
+.setup-banner > div { min-width: 0; flex: 1; }
+.setup-banner b { font-family: var(--display); font-weight: 600; font-size: 20px; }
+.setup-banner p { margin: 4px 0 0; color: var(--dim); }
+.rowi .acts { display: flex; gap: 8px; align-items: center; flex: none; }
+.rowi.model { align-items: flex-start; padding: 14px 2px; }
+.rowi.model .t > b { white-space: normal; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rowi.model .t > small { display: block; margin-top: 3px; line-height: 1.45; }
+.rowi.model.on .t > b { color: var(--ink); }
+.tag.ok { color: var(--green); background: var(--green-soft); }
+.tag.your { color: var(--yellow); background: var(--yellow-soft); }
+.prog { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; margin-top: 10px; max-width: 520px; }
+.prog .bar > i { background: var(--red); }
+.space { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.space > div { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; background: var(--suite); border: 1px solid var(--line); border-radius: var(--ctl); }
+.space b { font-family: var(--display); font-size: 24px; font-weight: 600; }
+@media (max-width: 640px) { .setup-banner { flex-direction: column; align-items: stretch; } .space { grid-template-columns: 1fr; }
+  .rowi.model { flex-wrap: wrap; } .rowi .acts { width: 100%; justify-content: flex-end; } }
+#aiAdd { flex-wrap: nowrap; } #aiAdd .input { flex: 1; min-width: 0; }
+.aihead { align-items: flex-start; } .aihead h2 { margin-top: 0; }

@@ -53,6 +53,15 @@ def _pick_device(cfg: Settings, log) -> tuple[str, str, str | None]:
             paused = cfg.llama_service
             free = gpu.free_vram_mb() or 0
     if free < need_fp16 and cfg.free_gpu_for_whisper:
+        from .engine import ENGINE
+        if ENGINE.running():                  # the built-in AI starts again by itself when clips are picked
+            ENGINE.stop()
+            log("Paused the built-in AI so Whisper can use the graphics card")
+            for _ in range(20):
+                if (free := gpu.free_vram_mb() or 0) >= need_fp16:
+                    break
+                time.sleep(0.5)
+    if free < need_fp16 and cfg.free_gpu_for_whisper:
         from .llm import unload_ollama
         if freed := unload_ollama():          # Ollama loads the model again by itself on the next request
             log(f"Freed the GPU for Whisper: Ollama unloaded {', '.join(freed)}")

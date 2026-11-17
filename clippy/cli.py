@@ -19,6 +19,9 @@ def main(argv: list[str] | None = None) -> int:
         return _auto(argv[1:])
     if argv and argv[0] == "ai":
         return _ai(argv[1:])
+    if argv and argv[0] == "app":
+        from .desktop import main as app
+        return app(argv[1:])
 
     ap = argparse.ArgumentParser(prog="clippy", description="Turn a YouTube video into ready-to-post vertical clips.")
     ap.add_argument("url", help="YouTube link (or a local video file)")
@@ -144,7 +147,10 @@ def _ai(argv: list[str]) -> int:
         print("\n" + error)
         return 1
     how = "found automatically" if (cfg.llm_url or "auto").lower() == "auto" else "from your settings"
-    print(f"\nClippy will use {using['model'] or 'the loaded model'} on {using['label']} ({how}).")
+    if using["kind"] == "Built-in AI":
+        print(f"\nClippy will use {using['model']} with its built-in AI (models/llm, AI & Tools in the app).")
+    else:
+        print(f"\nClippy will use {using['model'] or 'the loaded model'} on {using['label']} ({how}).")
     if argv[:1] == ["test"]:
         c = llm.LLM(cfg, log=print)
         c.wait_ready(timeout=20)

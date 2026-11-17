@@ -255,9 +255,18 @@ def autostart_set(body: AutostartIn):
 _llm_cache = {"t": 0.0, "ok": False, "model": "", "server": "", "error": ""}
 
 
+UI_SEEN = {"t": 0.0}            # the app window polls /api/status; desktop.py quits when it stops
+
+
+def work_in_progress() -> bool:
+    """A video being made or waiting its turn (closing the window shouldn't cut it off)."""
+    return any(j["state"] in ("queued", "running") for j in STORE.all())
+
+
 @app.get("/api/status")
 def status():
     from . import gpu, llm
+    UI_SEEN["t"] = time.time()
     cfg = config.load()
     if time.time() - _llm_cache["t"] > 10:
         try:
@@ -292,6 +301,98 @@ def ai_servers():
     _llm_cache["t"] = 0.0
     return {"auto": (cfg.llm_url or "auto").lower() == "auto", "servers": [f.to_dict() for f in found],
             "using": using, "error": error, "wsl": llm.wsl()}
+
+
+class SetupIn(BaseModel):
+    id: str = ""
+    url: str = ""
+    file: str = ""
+    mode: str = ""
+
+
+@app.get("/api/setup")
+def setup_status():
+    """Everything the AI & Tools page shows: parts, AI models, what's missing, space used."""
+    from . import components, engine
+    cfg = config.load()
+    out = config.output_root(cfg)
+    run = engine.ENGINE
+    return {"hardware": components.hardware(), "components": components.components(cfg), "models": engine.models(cfg),
+            "mode": (cfg.ai_mode or "auto").lower(), "missing": components.missing(cfg), "folder": str(config.ROOT),
+            "engine": {"running": run.running(), "model": run.model.stem if run.running() and run.model else ""},
+            "everything": components.TASKS["everything"].to_dict() if "everything" in components.TASKS else None,
+            "space": {"models": components.folder_size(components.LLM_DIR) + components.folder_size(components.WHISPER_DIR),
+                      "tools": components.folder_size(components.BIN) + components.folder_size(components.ENGINE_DIR),
+                      "clips": components.folder_size(out)}}
+
+
+@app.post("/api/setup/install")
+def setup_install(body: SetupIn):
+    from . import components, engine
+    cfg = config.load()
+    try:
+        if body.url:
+            t = engine.install_model(url=body.url)
+        elif body.id == "everything":
+            t = engine.setup_everything(cfg)
+        elif body.id.startswith("model:"):
+            t = engine.install_model(body.id[6:])
+        else:
+            t = components.install(body.id, cfg)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Unknown part")
+    return t.to_dict()
+
+
+@app.post("/api/setup/cancel")
+def setup_cancel(body: SetupIn):
+    from . import components
+    components.cancel(body.id)
+    return {"ok": True}
+
+
+@app.post("/api/setup/remove")
+def setup_remove(body: SetupIn):
+    from . import components, engine
+    cfg = config.load()
+    if body.file:
+        engine.remove_model(body.file)
+        if cfg.ai_model == Path(body.file).name:
+            config.save_ui_settings({"ai_model": ""})
+    elif body.id in components.PARTS:
+        components.remove(body.id, cfg)
+    else:
+        raise HTTPException(404, "Unknown part")
+    _llm_cache["t"] = 0.0
+    return {"ok": True}
+
+
+@app.post("/api/setup/use")
+def setup_use(body: SetupIn):
+    """Use this downloaded model for the built-in AI (it loads the next time clips are picked)."""
+    from . import components, engine
+    name = Path(body.file).name
+    if not (components.LLM_DIR / name).exists():
+        raise HTTPException(404, "That model isn't downloaded")
+    config.save_ui_settings({"ai_model": name, "ai_mode": "builtin" if config.load().ai_mode == "external" else config.load().ai_mode})
+    if engine.ENGINE.running() and engine.ENGINE.model and engine.ENGINE.model.name != name:
+        engine.ENGINE.stop()
+    _llm_cache["t"] = 0.0
+    return {"ok": True}
+
+
+@app.post("/api/setup/mode")
+def setup_mode(body: SetupIn):
+    from . import engine
+    if body.mode not in ("auto", "builtin", "external"):
+        raise HTTPException(400, "mode is auto, builtin or external")
+    config.save_ui_settings({"ai_mode": body.mode})
+    if body.mode == "external":
+        engine.ENGINE.stop()
+    _llm_cache["t"] = 0.0
+    return {"ok": True}
 
 
 @app.get("/api/overview")

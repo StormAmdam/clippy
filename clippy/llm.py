@@ -61,7 +61,7 @@ class Server:
 
     @property
     def label(self) -> str:
-        return f"{self.kind} at {self.where}"
+        return self.kind if self.kind == "Built-in AI" else f"{self.kind} at {self.where}"
 
     def to_dict(self) -> dict:
         return {"label": self.label, "kind": self.kind, "base": self.base, "context": self.context,
@@ -183,8 +183,16 @@ _cache: dict = {}
 _last_seen = {"t": 0.0}
 
 
-def resolve(cfg: Settings, max_age: float = 20) -> Server:
-    """The server Clippy should talk to right now (remembered for a few seconds)."""
+def resolve(cfg: Settings, max_age: float = 20, start: bool = False) -> Server:
+    """The server Clippy should talk to right now (remembered for a few seconds). The built-in AI comes first when a
+    model is downloaded for it; `start` loads it (otherwise it's reported as ready but not running)."""
+    mode = (getattr(cfg, "ai_mode", "auto") or "auto").lower()
+    if mode in ("auto", "builtin"):
+        from . import engine
+        if (s := engine.server(cfg, start=start)) is not None:
+            return s
+        if mode == "builtin":
+            raise RuntimeError("The built-in AI has no model yet. Open AI & Tools and download one.")
     key = (cfg.llm_url, cfg.llm_api_key)
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < max_age:
@@ -303,7 +311,7 @@ class LLM:
         t0, started = time.time(), False
         while True:
             try:
-                self._use(resolve(self.cfg))
+                self._use(resolve(self.cfg, start=True))
                 return
             except RuntimeError as e:
                 if not started and not self.base:
@@ -349,6 +357,11 @@ class LLM:
     def json(self, system: str, user: str, schema: dict, max_tokens: int = 3000, temperature: float = 0.4) -> dict:
         if self.server is None:
             self.wait_ready(timeout=30)
+        if self.kind == "Built-in AI":
+            from . import engine
+            if not engine.ENGINE.running():             # stopped for Whisper or after idling: load it again
+                self._use(resolve(self.cfg, start=True))
+            engine.ENGINE.touch()
         if self.kind == "Ollama":
             return self._ollama_json(system, user, schema, max_tokens, temperature)
         body: dict = {"model": self.model or "default", "temperature": temperature, "max_tokens": max_tokens,

@@ -28,6 +28,13 @@ def preload_cuda_libs() -> None:
     site = next((p for p in sys.path if p.endswith("site-packages") and os.path.isdir(os.path.join(p, "nvidia"))), None)
     if not site:
         return
+    if sys.platform == "win32":               # Windows: the wheels ship DLLs in nvidia/<pkg>/bin
+        for pkg in ("cuda_nvrtc", "cublas", "cudnn"):
+            d = os.path.join(site, "nvidia", pkg, "bin")
+            if os.path.isdir(d):
+                os.add_dll_directory(d)
+                os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+        return
     for pkg in ("cuda_nvrtc", "cublas", "cudnn"):
         libdir = os.path.join(site, "nvidia", pkg, "lib")
         files = sorted(glob.glob(os.path.join(libdir, "lib*.so*")),

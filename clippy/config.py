@@ -19,6 +19,10 @@ class Settings:
     llm_thinking: bool = False     # let the model "think" first (slower, sometimes smarter)
     llm_chunk_chars: int = 60000   # most transcript per request (~20k tokens); less when the server's context is smaller
     llm_context: int = 0           # tokens per request; 0 = ask the server (Ollama: 16384)
+    ai_mode: str = "auto"          # auto = built-in AI when a model is downloaded, else another AI app | builtin | external
+    ai_model: str = ""             # built-in AI: file name in models/llm (empty = the only/newest one)
+    ai_context: int = 0            # built-in AI context window (0 = 32768)
+    ai_idle_minutes: int = 10      # built-in AI: free its memory after this long without use
 
     # ── GPU
     llama_service: str = "llama-coder"   # systemd --user service to pause while Whisper uses the GPU ("" = never)

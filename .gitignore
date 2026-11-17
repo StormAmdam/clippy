@@ -6,8 +6,14 @@ __pycache__/
 
 # Your data: downloads, transcripts, finished clips, Autopilot/Review state, YouTube login, scans
 output/
-# Whisper model (downloads itself on first use)
+# Everything Clippy downloads for itself (AI & Tools): models, AI engine, tools, partial downloads
 models/whisper/
+models/llm/
+engine/
+bin/
+downloads/
+data/
+fonts/NotoColorEmoji.ttf
 # Settings saved from the web UI (can hold API keys)
 settings.json
 # Your own sound effects
@@ -24,3 +30,8 @@ Clippy-extras.zip
 skills-lock.json
 .superpowers/
 docs/superpowers/
+
+# Windows app build output
+dist/
+packaging/windows/*.obj
+packaging/windows/*.res

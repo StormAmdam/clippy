@@ -167,7 +167,7 @@ let timers = [], leaveGuard = null, lastHash = location.hash;
 const repeat = (ms, fn) => timers.push(setInterval(fn, ms));
 const params = () => new URLSearchParams(location.hash.split("?")[1] || "");
 function setParam(k, v) { const p = params(); p.set(k, v); history.replaceState(null, "", `${location.hash.split("?")[0]}?${p}`); lastHash = location.hash; }
-const TITLES = {home: "Home", make: "Make Clips", find: "Find Videos", auto: "Autopilot", review: "Review", library: "Library", settings: "Settings"};
+const TITLES = {home: "Home", make: "Make Clips", find: "Find Videos", auto: "Autopilot", review: "Review", library: "Library", ai: "AI & Tools", settings: "Settings"};
 async function route() {
   let name = (location.hash.slice(1) || "home").split("?")[0];
   if (name === "autopilot") name = "auto";
@@ -251,12 +251,22 @@ async function reviewAction(id, act, extra = {}, after = () => route()) {
 }
 
 // ═════════════════════════ HOME ═════════════════════════
+async function setupBanner(box) {
+  let s;
+  try { s = await api.get("/api/setup"); } catch { return; }
+  if (!box.isConnected || !s.missing.length) return;
+  const names = s.missing.map((m) => m === "ai" ? "an AI model" : (s.components.find((c) => c.id === m)?.name || m).toLowerCase());
+  box.innerHTML = `<section class="setup-banner"><div><b>Finish setting up Clippy</b><p>It still needs ${esc(names.join(" and "))}. Everything downloads into Clippy's own folder.</p></div><a class="btn primary" href="#ai">${icon("download")} Set Up</a></section>`;
+  hydrateIcons(box);
+}
+
 pages.home = async (el) => {
   const h = new Date().getHours();
   const hello = h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   el.innerHTML = `
     <div class="ph"><div><h1>${hello}</h1><p>What's waiting for you, and what Clippy is working on.</p></div></div>
-    <nav class="mob-links" aria-label="More"><a class="btn sm" href="#library">${icon("grid")} Library</a><a class="btn sm" href="#settings">${icon("sliders")} Settings</a></nav>
+    <div id="hSetup"></div>
+    <nav class="mob-links" aria-label="More"><a class="btn sm" href="#library">${icon("grid")} Library</a><a class="btn sm" href="#ai">${icon("cpu")} AI &amp; Tools</a><a class="btn sm" href="#settings">${icon("sliders")} Settings</a></nav>
     <form class="linkbar" id="hForm">
       <input class="input big" id="hUrl" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="YouTube link or video file" placeholder="https://www.youtube.com/watch?v=…">
       <button class="btn primary lg">${icon("scissors")} Make Clips</button></form>
@@ -334,6 +344,7 @@ pages.home = async (el) => {
         <button type="button" class="btn sm" data-run="${p.id}" ${p.job ? "disabled" : ""}>${icon("play")} Run Now</button></div>`).join("")}</div></section>`;
     $$("[data-run]", $("#hChannels")).forEach((b) => b.onclick = async () => { b.disabled = true; try { await api.post(`/api/auto/profiles/${b.dataset.run}/run`); toast("Started — this takes a few minutes"); load(); } catch (e) { fail(e); b.disabled = false; } });
   };
+  setupBanner($("#hSetup"));
   $("#hForm").onsubmit = async (e) => {
     e.preventDefault();
     const url = $("#hUrl").value.trim(); if (!url) { $("#hUrl").focus(); return; }
@@ -991,6 +1002,87 @@ pages.library = async (el) => {
     hydrateIcons(el);
   };
   await load();
+};
+
+// ═════════════════════════ AI & TOOLS ═════════════════════════
+pages.ai = async (el) => {
+  el.innerHTML = `<div class="ph"><div><h1>AI and tools</h1><p>Everything Clippy downloads stays in its own folder. Uninstall Clippy and all of it goes too.</p></div></div>
+    <div id="aiBanner"></div>
+    <section class="panel">
+      <div class="row between aihead" style="gap:12px;flex-wrap:wrap"><div><h2>AI model</h2><p class="sub">Reads the transcript and picks the moments worth posting. Bigger models pick better.</p></div>
+        <div class="seg" id="aiMode" role="radiogroup" aria-label="Which AI to use">
+          <button type="button" role="radio" data-v="auto">Automatic</button><button type="button" role="radio" data-v="builtin">Built-in</button><button type="button" role="radio" data-v="external">Another App</button></div></div>
+      <p class="small muted" id="aiModeNote" style="margin:10px 0 0"></p>
+      <div class="rows models" id="aiList"></div>
+      <form class="row" id="aiAdd" style="gap:8px;margin-top:14px"><input class="input" id="aiUrl" type="url" autocomplete="off" spellcheck="false" aria-label="Hugging Face link to a .gguf file" placeholder="Add any model: paste a Hugging Face link to a .gguf file…"><button class="btn">${icon("plus")} Add</button></form>
+    </section>
+    <section class="panel"><h2>Tools</h2><p class="sub">The parts that turn a video into shorts.</p><div class="rows" id="aiParts"></div></section>
+    <section class="panel"><h2>Space used</h2><p class="sub" id="aiFolder"></p><div class="space" id="aiSpace"></div></section>`;
+  hydrateIcons(el);
+  let last = null;
+  const pct = (t) => t && t.total ? Math.round(100 * t.done / t.total) : null;
+  const progress = (t) => t && t.state === "running"
+    ? `<div class="prog"><div class="bar ${pct(t) == null ? "wait" : ""}"><i style="width:${pct(t) ?? 0}%"></i></div><span class="small muted num">${t.step ? esc(t.step) : pct(t) != null ? `${fmtBytes(t.done)} of ${fmtBytes(t.total)}` : "Working…"}</span></div>` : "";
+  const failed = (t) => t && t.state === "failed" ? `<span class="err-text">${esc(t.error)}</span>` : "";
+  const draw = (s) => {
+    last = s;
+    $$("#aiMode button").forEach((b) => { const on = b.dataset.v === s.mode; b.classList.toggle("on", on); b.setAttribute("aria-checked", on); });
+    $("#aiModeNote").textContent = {auto: "Uses the built-in AI when a model is downloaded, otherwise an AI app that's running on this PC (Ollama, LM Studio…).",
+      builtin: "Always uses the built-in AI and the model marked In Use.", external: "Uses an AI app running on this PC, like Ollama or LM Studio. See Settings for which one."}[s.mode];
+    const ev = s.everything;
+    $("#aiBanner").innerHTML = s.missing.length || (ev && ev.state === "running")
+      ? `<section class="setup-banner"><div><b>${ev && ev.state === "running" ? `Setting up: ${esc(ev.label)}` : "Clippy needs a few things before it can make clips"}</b>
+          <p>${ev && ev.state === "running" ? "You can keep using Clippy while this downloads." : `One button gets everything that fits this PC${s.missing.includes("ai") ? `, including the ${esc(s.models.find((m) => m.recommended)?.name || "")} AI model` : ""}.`}</p>
+          ${progress(ev)}${failed(ev)}</div>
+          ${ev && ev.state === "running" ? `<button type="button" class="btn quiet" data-cancel="everything">${icon("x")} Stop</button>` : `<button type="button" class="btn primary" id="aiAll">${icon("download")} Set Up Everything</button>`}</section>` : "";
+    $("#aiList").innerHTML = s.models.map((m) => {
+      const t = m.task, busy = t && t.state === "running";
+      const tags = [m.active ? `<span class="tag ok">${icon("check")} In use</span>` : "", m.recommended && !m.installed ? `<span class="tag your">Best fit for this PC</span>` : "",
+        !m.fits ? `<span class="tag">Too big for this PC</span>` : ""].join("");
+      const act = busy ? `<button type="button" class="btn sm quiet" data-cancel="${esc(t.id)}">${icon("x")} Cancel</button>`
+        : !m.installed ? `<button type="button" class="btn sm ${m.recommended ? "primary" : ""}" data-get="${esc(m.id)}">${icon("download")} Download</button>`
+        : `${m.active ? "" : `<button type="button" class="btn sm" data-use="${esc(m.file)}">Use</button>`}<button type="button" class="btn sm quiet" data-del="${esc(m.file)}" aria-label="Delete ${esc(m.name)}">${icon("trash")}</button>`;
+      return `<div class="rowi model ${m.active ? "on" : ""}"><div class="t"><b>${esc(m.name)} ${tags}</b><small>${esc(m.about)} <span class="num">${m.gb} GB</span>${m.page ? ` <a href="${esc(m.page)}" target="_blank" rel="noopener">Model page</a>` : ""}</small>${progress(t)}${failed(t)}</div><div class="acts">${act}</div></div>`;
+    }).join("");
+    $("#aiParts").innerHTML = s.components.map((c) => {
+      const t = c.task, busy = t && t.state === "running";
+      const right = busy ? `<button type="button" class="btn sm quiet" data-cancel="${esc(c.id)}">${icon("x")} Cancel</button>`
+        : c.installed ? `<span class="tag ok">${icon("check")} Ready</span>${c.removable ? `<button type="button" class="btn sm quiet" data-rm="${esc(c.id)}" aria-label="Remove ${esc(c.name)}">${icon("trash")}</button>` : ""}`
+        : `<button type="button" class="btn sm" data-part="${esc(c.id)}">${icon("download")} Download <span class="num faint">${fmtBytes(c.size)}</span></button>`;
+      return `<div class="rowi"><div class="ic ${c.installed ? "ok" : ""}">${icon(c.installed ? "checkCircle" : "download")}</div><div class="t"><b>${esc(c.name)}</b><small>${esc(c.about)} ${esc(c.detail)}</small>${progress(t)}${failed(t)}</div><div class="acts">${right}</div></div>`;
+    }).join("");
+    $("#aiFolder").textContent = `All in ${s.folder}`;
+    $("#aiSpace").innerHTML = [["AI and speech models", s.space.models], ["Tools and AI engine", s.space.tools], ["Your videos and shorts", s.space.clips]]
+      .map(([n, b]) => `<div><span class="small muted">${n}</span><b class="num">${fmtBytes(b)}</b></div>`).join("");
+    hydrateIcons(el);
+  };
+  const load = async () => { try { draw(await api.get("/api/setup")); } catch (e) { fail(e); } };
+  const act = async (fn, msg) => { try { await fn(); if (msg) toast(msg); } catch (e) { fail(e); } await load(); };
+  el.addEventListener("click", async (e) => {
+    const b = e.target.closest("button");
+    if (!b || !el.contains(b)) return;
+    if (b.id === "aiAll") return act(() => api.post("/api/setup/install", {id: "everything"}), "Setting up. You can keep using Clippy meanwhile.");
+    if (b.dataset.v && b.closest("#aiMode")) return act(() => api.post("/api/setup/mode", {mode: b.dataset.v}));
+    if (b.dataset.get) return act(() => api.post("/api/setup/install", {id: "model:" + b.dataset.get}));
+    if (b.dataset.part) return act(() => api.post("/api/setup/install", {id: b.dataset.part}));
+    if (b.dataset.cancel) return act(() => api.post("/api/setup/cancel", {id: b.dataset.cancel}), "Stopped. It continues where it left off next time.");
+    if (b.dataset.use) return act(() => api.post("/api/setup/use", {file: b.dataset.use}), "Clippy will use this model from the next video on");
+    if (b.dataset.del) {
+      const m = last?.models.find((x) => x.file === b.dataset.del);
+      if (await confirmDialog({title: `Delete ${m?.name || "this model"}?`, body: `This frees ${m?.gb ?? "?"} GB. You can download it again any time.`, confirm: "Delete Model", danger: true}))
+        return act(() => api.post("/api/setup/remove", {file: b.dataset.del}), "Model deleted");
+    }
+    if (b.dataset.rm) {
+      const c = last?.components.find((x) => x.id === b.dataset.rm);
+      if (await confirmDialog({title: `Remove ${c?.name || "this part"}?`, body: "Clippy can download it again whenever it's needed.", confirm: "Remove", danger: true}))
+        return act(() => api.post("/api/setup/remove", {id: b.dataset.rm}), "Removed");
+    }
+  });
+  $("#aiAdd").onsubmit = (e) => { e.preventDefault(); const url = $("#aiUrl").value.trim(); if (!url) return;
+    act(async () => { await api.post("/api/setup/install", {url}); $("#aiUrl").value = ""; }, "Downloading your model"); };
+  await load();
+  repeat(1500, () => { const busy = last && (last.everything?.state === "running" || last.models.some((m) => m.task?.state === "running") || last.components.some((c) => c.task?.state === "running")); if (busy) load(); });
+  repeat(15000, load);
 };
 
 // ═════════════════════════ SETTINGS ═════════════════════════

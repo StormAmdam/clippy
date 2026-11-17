@@ -19,8 +19,15 @@ from .config import ROOT, Settings
 
 FONTS = ROOT / "fonts"
 OUT_W, OUT_H = 1080, 1920
-EMOJI_FONTS = ["/usr/share/fonts/noto/NotoColorEmoji.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+EMOJI_FONTS = [str(FONTS / "NotoColorEmoji.ttf"),          # downloaded into Clippy's folder (AI & Tools)
+               "/usr/share/fonts/noto/NotoColorEmoji.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
                "/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf"]
+
+
+def find_emoji_font() -> str | None:
+    """A color emoji font Pillow can draw (bitmap Noto Color Emoji), or None."""
+    import os
+    return next((f for f in EMOJI_FONTS if os.path.exists(f)), None)
 
 STYLES: dict[str, dict] = {
     # MrBeast / gaming-edit look: chunky comic font, 2 words at a time, tilted bouncing words

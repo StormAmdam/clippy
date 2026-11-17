@@ -46,34 +46,62 @@ ENV_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / 
 
 # ───────────────────────── what fits ─────────────────────────
 
-def hardware() -> dict:
-    vram = 0
+def ram_mb() -> int:
+    """Installed RAM in MiB (Linux and Windows)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("sullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        m = MEMORYSTATUSEX()
+        m.dwLength = ctypes.sizeof(m)
+        return int(m.ullTotalPhys // (1024 * 1024)) if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)) else 0
+    try:
+        return int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1)) // 1024
+    except (OSError, AttributeError):
+        return 0
+
+
+def vram_mb() -> int:
+    """Graphics memory of the first NVIDIA card in MiB, 0 without one."""
     if smi := gpu.nvidia_smi():
         try:
-            out = subprocess.run([smi, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                                 capture_output=True, text=True, timeout=10).stdout.split()
-            vram = int(out[0]) if out else 0
+            out = subprocess.run([smi, "--query-gpu=memory.total", "--format=csv,noheader,nounits"], capture_output=True,
+                                 text=True, timeout=10, **_hidden()).stdout.split()
+            return int(out[0]) if out else 0
         except (OSError, ValueError, subprocess.SubprocessError):
-            vram = 0
-    ram = 0
-    try:
-        ram = int(re.search(r"MemTotal:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1)) // 1024
-    except (OSError, AttributeError):
-        pass
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    disk = shutil.disk_usage(MODELS_DIR).free // (1024 * 1024)
-    return {"vram_mb": vram, "ram_mb": ram, "disk_free_mb": disk, "threads": physical_cores(),
-            "arch": platform.machine(), "nvidia": vram > 0, "vulkan": _has_vulkan()}
+            return 0
+    return 0
+
+
+def _hidden() -> dict:
+    """subprocess options that keep a console window from flashing up on Windows."""
+    return {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+
+
+def hardware(models_dir: Path | None = None) -> dict:
+    vram = vram_mb()
+    where = models_dir or MODELS_DIR
+    where.mkdir(parents=True, exist_ok=True)
+    disk = shutil.disk_usage(where).free // (1024 * 1024)
+    return {"vram_mb": vram, "ram_mb": ram_mb(), "disk_free_mb": disk, "threads": physical_cores(),
+            "arch": platform.machine(), "os": "windows" if sys.platform == "win32" else "linux",
+            "nvidia": vram > 0, "vulkan": _has_vulkan()}
 
 
 def physical_cores() -> int:
-    try:
-        out = subprocess.run(["lscpu", "-p=CORE,SOCKET"], capture_output=True, text=True, timeout=10).stdout
-        cores = {ln for ln in out.splitlines() if ln and not ln.startswith("#")}
-        if cores:
-            return max(1, min(len(cores), 16))
-    except (OSError, subprocess.SubprocessError):
-        pass
+    if sys.platform != "win32":
+        try:
+            out = subprocess.run(["lscpu", "-p=CORE,SOCKET"], capture_output=True, text=True, timeout=10).stdout
+            cores = {ln for ln in out.splitlines() if ln and not ln.startswith("#")}
+            if cores:
+                return max(1, min(len(cores), 16))
+        except (OSError, subprocess.SubprocessError):
+            pass
     return max(1, min((os.cpu_count() or 2) // 2, 16))
 
 
@@ -92,6 +120,14 @@ def vulkan_gpu(drm: Path = Path("/sys/class/drm"), has_loader: bool | None = Non
 
 
 def _has_vulkan() -> bool:
+    if sys.platform == "win32":                # AMD or Intel graphics: llama.cpp's Vulkan build runs well there
+        try:
+            out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  "(Get-CimInstance Win32_VideoController).Name"], capture_output=True, text=True,
+                                 timeout=20, **_hidden()).stdout.lower()
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return bool(re.search(r"\b(amd|radeon|intel)\b", out)) and "nvidia" not in out
     from .llm import wsl
     return not wsl() and vulkan_gpu()          # WSL's Vulkan layer isn't something llama.cpp runs well on
 
@@ -119,14 +155,25 @@ def gguf_model(vram_mb: int, ram_mb: int, disk_free_mb: int, size: str = "auto")
     return None
 
 
-def llama_assets(names: list[str], nvidia: bool, arch: str, vulkan: bool) -> list[str]:
+def llama_assets(names: list[str], nvidia: bool, arch: str, vulkan: bool, system: str = "") -> list[str]:
     """Which files of a llama.cpp release to download: the server build, plus the CUDA runtime for NVIDIA cards.
     CUDA 12.x builds run on any driver from 525 up (13.x needs a very new one), so 12.x is always the choice."""
-    a = "arm64" if arch in ("aarch64", "arm64") else "x64"
+    a = "arm64" if arch.lower() in ("aarch64", "arm64") else "x64"
+    win = (system or ("windows" if sys.platform == "win32" else "linux")) == "windows"
 
     def find(pattern: str) -> str | None:
         return next((n for n in sorted(names, reverse=True) if re.fullmatch(pattern, n)), None)
 
+    if win:
+        if nvidia and a == "x64":
+            main = find(r"llama-b\d+-bin-win-cuda-12\.\d+-x64\.zip")
+            runtime = find(r"cudart-llama-(?:b\d+-)?bin-win-cuda-12\.\d+-x64\.zip")
+            if main and runtime and main.split("cuda-")[1] == runtime.split("cuda-")[1]:
+                return [main, runtime]
+        if vulkan and (v := find(rf"llama-b\d+-bin-win-vulkan-{a}\.zip")):
+            return [v]
+        cpu = find(rf"llama-b\d+-bin-win-cpu-{a}\.zip")
+        return [cpu] if cpu else []
     if nvidia and a == "x64":
         main = find(r"llama-b\d+-bin-ubuntu-cuda-12\.\d+-x64\.tar\.gz")
         runtime = find(r"cudart-llama-b\d+-bin-ubuntu-cuda-12\.\d+-x64\.tar\.gz")
@@ -151,18 +198,24 @@ def write_env(path: Path, model: str, vram_mb: int, threads: int, ctx: int = 327
 
 # ───────────────────────── installing ─────────────────────────
 
-def download(url: str, dest: Path, label: str) -> Path:
-    """Resumable download with a progress line; the file only gets its real name once complete."""
+class Cancelled(Exception):
+    """A download was stopped on purpose."""
+
+
+def download(url: str, dest: Path, label: str, progress=None, cancelled=lambda: False) -> Path:
+    """Resumable download; the file only gets its real name once complete. progress(done, total) replaces the
+    terminal progress line; cancelled() is checked between chunks (the partial file stays for resuming)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
-        print(f"  ✓ {label} already downloaded", flush=True)
+        if progress is None:
+            print(f"  ✓ {label} already downloaded", flush=True)
         return dest
     part = dest.with_name(dest.name + ".part")
     have = part.stat().st_size if part.exists() else 0
     headers = {"Range": f"bytes={have}-"} if have else {}
     with httpx.stream("GET", url, headers=headers, follow_redirects=True, timeout=60) as r:
         if r.status_code == 416:                                   # already complete
-            part.rename(dest)
+            os.replace(part, dest)
             return dest
         r.raise_for_status()
         if r.status_code != 206:
@@ -172,28 +225,57 @@ def download(url: str, dest: Path, label: str) -> Path:
         with open(part, "ab" if have else "wb") as f:
             done = have
             for chunk in r.iter_bytes(1 << 20):
+                if cancelled():
+                    raise Cancelled(label)
                 f.write(chunk)
                 done += len(chunk)
                 if time.time() - last > 0.5:
                     last = time.time()
-                    speed = (done - have) / max(time.time() - t0, 0.1) / 1e6
-                    pct = f"{100 * done / total:5.1f}%" if total else ""
-                    print(f"\r  {label}: {pct} {human(done)} of {human(total)}  {speed:.0f} MB/s   ", end="", flush=True)
-    print(f"\r  ✓ {label}: {human(part.stat().st_size)}" + " " * 30, flush=True)
-    part.rename(dest)
+                    if progress:
+                        progress(done, total)
+                    else:
+                        speed = (done - have) / max(time.time() - t0, 0.1) / 1e6
+                        pct = f"{100 * done / total:5.1f}%" if total else ""
+                        print(f"\r  {label}: {pct} {human(done)} of {human(total)}  {speed:.0f} MB/s   ", end="", flush=True)
+    if progress is None:
+        print(f"\r  ✓ {label}: {human(part.stat().st_size)}" + " " * 30, flush=True)
+    os.replace(part, dest)
     return dest
 
 
-def _extract(tgz: Path, into: Path) -> None:
-    """Unpack a release tarball into `into`, dropping its top folder (like tar --strip-components=1)."""
+def extract(archive: Path, into: Path, only=None) -> None:
+    """Unpack a .zip or .tar.* into `into`. A single top folder shared by every entry is dropped (like
+    tar --strip-components=1). only(name) can limit which files are kept, which then land flat in `into`."""
+    import zipfile
     into.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(tgz) as tf:
-        for m in tf.getmembers():
-            parts = Path(m.name).parts[1:]
-            if not parts or ".." in parts:
+    if archive.name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as z:
+            names = [n for n in z.namelist() if not n.endswith("/")]
+            tops = {n.split("/", 1)[0] for n in names}
+            strip = len(tops) == 1 and all("/" in n for n in names)
+            for n in names:
+                parts = Path(n).parts[1:] if strip else Path(n).parts
+                if not parts or ".." in parts or (only and not only(n)):
+                    continue
+                target = into / (parts[-1] if only else Path(*parts))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(n) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        return
+    with tarfile.open(archive) as tf:
+        members = [m for m in tf.getmembers() if m.isfile() or m.issym()]
+        tops = {Path(m.name).parts[0] for m in members if Path(m.name).parts}
+        strip = len(tops) == 1 and all(len(Path(m.name).parts) > 1 for m in members)
+        for m in members:
+            parts = Path(m.name).parts[1:] if strip else Path(m.name).parts
+            if not parts or ".." in parts or (only and not only(m.name)):
                 continue
-            m.name = str(Path(*parts))
+            m.name = parts[-1] if only else str(Path(*parts))
             tf.extract(m, into, filter="data")
+
+
+def _extract(tgz: Path, into: Path) -> None:
+    extract(tgz, into)
 
 
 def install_llamacpp(hw: dict) -> Path:
