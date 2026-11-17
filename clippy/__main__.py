@@ -8,7 +8,8 @@ if sys.platform == "win32" and not sys.flags.utf8_mode:
     import ctypes
     import subprocess
     os.environ["PYTHONUTF8"] = "1"
-    child = subprocess.Popen([sys.executable, "-X", "utf8", "-m", "clippy", *sys.argv[1:]])
+    # creationflags=0 on purpose: the restarted Clippy shares this terminal, so its output still shows
+    child = subprocess.Popen([sys.executable, "-X", "utf8", "-m", "clippy", *sys.argv[1:]], creationflags=0)
     # tie the restarted Clippy (and the AI engine it starts) to this process: if this one is ended, so are they
     k32 = ctypes.windll.kernel32
     k32.CreateJobObjectW.restype = ctypes.c_void_p
