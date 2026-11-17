@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write      # attach the installer and zip to the release for version tags
     timeout-minutes: 75
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
