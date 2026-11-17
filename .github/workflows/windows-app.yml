@@ -24,6 +24,30 @@ jobs:
       - name: Build, smoke-test and package
         shell: pwsh
         run: ./packaging/windows/build.ps1 -SmokeTest
+      - name: Install, open and uninstall it like a user would
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\Clippy-Setup-*.exe).FullName
+          Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          $dir = "$env:LOCALAPPDATA\Programs\Clippy"
+          if (-not (Test-Path "$dir\Clippy.exe")) { throw "The installer didn't put Clippy in $dir" }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clippy.lnk")) { throw "No Start menu shortcut" }
+          Start-Process "$dir\Clippy.exe"
+          $ok = $false
+          foreach ($i in 1..90) { try { Invoke-RestMethod http://127.0.0.1:7860/api/status | Out-Null; $ok = $true; break } catch { Start-Sleep 2 } }
+          if (-not $ok) { Get-Content "$dir\data\clippy.log" -ErrorAction SilentlyContinue; throw "Clippy.exe didn't start the app" }
+          $s = Invoke-RestMethod http://127.0.0.1:7860/api/setup
+          "Clippy.exe started the app; its folder: $($s.folder); still needs: $($s.missing -join ', ')"
+          if ($s.folder -ne $dir) { throw "The app isn't using its own folder" }
+          Start-Sleep 5
+          if (Test-Path "$dir\data\window") { "App window profile lives inside the app folder: $dir\data\window" }
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$dir*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          Start-Sleep 3
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          foreach ($i in 1..20) { if (-not (Test-Path $dir)) { break }; Start-Sleep 1 }
+          if (Test-Path $dir) { Get-ChildItem -Recurse $dir | Select-Object -First 20 FullName; throw "Uninstalling left files behind" }
+          if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clippy.lnk") { throw "Uninstalling left the Start menu shortcut" }
+          "Installed, opened and uninstalled: nothing left behind"
       - uses: actions/upload-artifact@v4
         with:
           name: Clippy-windows-${{ env.CLIPPY_VERSION }}
