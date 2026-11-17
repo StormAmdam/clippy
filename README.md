@@ -41,6 +41,8 @@ and the picture instead.
 
 1. Download **Clippy-Setup-win64.exe** from the [latest release](https://github.com/StormAmdam/clippy/releases/latest)
    and run it. No admin rights needed. (Prefer no installer? The portable zip works from any folder.)
+   Windows may say **"Windows protected your PC"** because the installer isn't code-signed yet: click
+   **More info**, then **Run anyway**.
 2. Clippy opens in its own window. On **AI & Tools**, press **Set Up Everything**: it downloads the video tools,
    the speech model and an AI model that fits your PC, or uses Ollama or LM Studio if you already run one.
 3. Paste a YouTube link and press **Make Clips**.
