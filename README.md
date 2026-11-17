@@ -267,6 +267,7 @@ copyright notice and credit the original project.
 
 ## Credits
 
+- Windows app testing: [goofymyt-hash](https://github.com/goofymyt-hash)
 - Demo footage: [*Meet NASA Astronaut Christina Koch*](https://www.youtube.com/watch?v=942n6DsJIRw) (NASA Johnson)
   and NASA Goddard videos in the screenshots. NASA material is public domain; NASA does not endorse this project.
 - Fonts: [Montserrat](https://github.com/JulietaUla/Montserrat) and [Barlow](https://github.com/jpt/barlow)
