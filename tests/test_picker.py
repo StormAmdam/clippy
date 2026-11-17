@@ -56,3 +56,29 @@ def test_heat_by_sentence_uses_spikes_not_intro():
     heat = [{"s": float(i), "e": float(i + 1), "v": v} for i, v in enumerate([1.0] * 3 + [0.3] * 50 + [0.9] + [0.3] * 46)]
     sents = [{"s": 0.5, "e": 1.5}, {"s": 53.2, "e": 53.8}, {"s": 80.0, "e": 81.0}]
     assert picker._heat_by_sentence(sents, heat) == [0.0, 1.0, 0.0]
+
+
+def test_tidy_post_moves_trailing_hashtags_out_of_the_caption():
+    # the AI often ends its caption with the same hashtags it also returns separately
+    caption, tags = picker.tidy_post("Who would you trust? 👇 #linux #ai #Coding",
+                                     ["#Linux", "#AI", "#openSource"])
+    assert caption == "Who would you trust? 👇"
+    assert tags == ["#Linux", "#AI", "#openSource", "#Coding"]
+
+
+def test_tidy_post_handles_hashtag_only_lines_and_bare_tags():
+    caption, tags = picker.tidy_post("From Antarctica to a spacewalk.\nWhat scares you?\n#astronaut #space",
+                                     ["astronaut", "#Courage", "#courage", ""])
+    assert caption == "From Antarctica to a spacewalk.\nWhat scares you?"
+    assert tags == ["#astronaut", "#Courage", "#space"]
+
+
+def test_tidy_post_keeps_hashtags_used_inside_a_sentence():
+    caption, tags = picker.tidy_post("Why #NASA keeps flying. Agree?", ["#NASA", "#space"])
+    assert caption == "Why #NASA keeps flying. Agree?"
+    assert tags == ["#NASA", "#space"]
+
+
+def test_tidy_post_caps_the_hashtag_count():
+    _, tags = picker.tidy_post("x #a #b #c #d", ["#e", "#f", "#g", "#h"])
+    assert tags == ["#e", "#f", "#g", "#h", "#a", "#b"]

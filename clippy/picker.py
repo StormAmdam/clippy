@@ -121,6 +121,34 @@ class LLM:
         raise RuntimeError("AI request failed after retries")
 
 
+_HASHTAG = re.compile(r"#\w+")
+_TRAILING_HASHTAGS = re.compile(r"(?:\s*#\w+)+\s*$")
+
+
+def tidy_post(caption: str, hashtags, limit: int = 6) -> tuple[str, list[str]]:
+    """Keep the post text and its hashtags apart. The AI often ends the caption with hashtags as well, which then
+    show up twice under the short. Hashtags at the end of the caption or on lines of their own move to the list;
+    ones used inside a sentence stay. The list gets '#' prefixes, loses repeats (any case) and is capped."""
+    moved, kept = [], []
+    for line in (caption or "").strip().splitlines():
+        if line.split() and all(tok.startswith("#") for tok in line.split()):
+            moved += _HASHTAG.findall(line)
+        else:
+            kept.append(line)
+    text = "\n".join(kept).strip()
+    if m := _TRAILING_HASHTAGS.search(text):
+        moved = _HASHTAG.findall(m.group()) + moved
+        text = text[:m.start()].rstrip()
+    out, seen = [], set()
+    for h in [*(hashtags or []), *moved]:
+        h = re.sub(r"\s+", "", str(h))
+        h = h if h.startswith("#") else "#" + h
+        if len(h) > 1 and h.lower() not in seen:
+            seen.add(h.lower())
+            out.append(h)
+    return text, out[:limit]
+
+
 def parse_json(text: str) -> dict:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
@@ -453,8 +481,8 @@ def pick_clips(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m
             a, b = _fit(sents, int(r["start_id"]), int(r["end_id"]), cfg)
             if not (lo <= a <= hi and lo <= b <= hi) or sents[b]["e"] - sents[a]["s"] < cfg.min_seconds * 0.6:
                 a, b = c["a"], c["b"]
-            meta = {"title": str(r.get("title", "")).strip().strip('"'), "caption": str(r.get("caption", "")).strip(),
-                    "hashtags": [h if h.startswith("#") else "#" + h for h in (r.get("hashtags") or []) if h][:6],
+            caption, hashtags = tidy_post(str(r.get("caption", "")), r.get("hashtags"))
+            meta = {"title": str(r.get("title", "")).strip().strip('"'), "caption": caption, "hashtags": hashtags,
                     "emphasis": [str(e) for e in (r.get("emphasis") or [])][:6],
                     "emoji": [e for e in (r.get("emoji") or []) if isinstance(e, dict)][:4],
                     "teaser": _teaser(sents, words, int(r.get("teaser_id", -1)), a, b),

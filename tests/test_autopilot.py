@@ -63,3 +63,12 @@ def test_cancelled_or_failed_scheduled_run_waits_for_its_next_slot(tmp_output, m
     server._run_job(job["id"])
     assert server.STORE.get(job["id"])["state"] == "error"
     assert not server._profile_due(autopilot.get_profile(p["id"]), time.time())      # no rescanning every minute
+
+
+def test_description_never_repeats_hashtags_already_in_the_caption():
+    # review items made before captions were tidied still carry the AI's hashtags in the caption
+    item = {"caption": "Do you trust AI to write your code? #linux #ai #coding", "hashtags": ["#linux", "#ai", "#coding"],
+            "source_channel": "Lex Clips", "source_url": "https://youtu.be/x", "title": "T"}
+    out = autopilot.render_description({}, item)
+    assert out.count("#linux") == 1 and out.count("#coding") == 1
+    assert out.startswith("Do you trust AI to write your code?\n\n#linux #ai #coding #Shorts")

@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 
 from . import config, finder
+from .picker import tidy_post
 
 LOCK = threading.RLock()
 
@@ -163,11 +164,13 @@ def _add_items(new: list[dict]) -> None:
 
 
 def render_description(profile: dict, item: dict) -> str:
-    tags = " ".join(item.get("hashtags") or [])
-    extra = " ".join(h if h.startswith("#") else "#" + h for h in profile.get("extra_hashtags", "").split() if h)
     text = profile.get("description_template") or PROFILE_DEFAULTS["description_template"]
-    out = (text.replace("{caption}", item.get("caption") or "")
-               .replace("{hashtags}", (tags + " " + extra).strip())
+    caption, tags = tidy_post(item.get("caption") or "",
+                              [*(item.get("hashtags") or []), *profile.get("extra_hashtags", "").split()], limit=15)
+    if "#shorts" in text.lower():                       # the template already adds it
+        tags = [t for t in tags if t.lower() != "#shorts"]
+    out = (text.replace("{caption}", caption)
+               .replace("{hashtags}", " ".join(tags))
                .replace("{source_channel}", item.get("source_channel") or "")
                .replace("{source_url}", item.get("source_url") or "")
                .replace("{title}", item.get("title") or ""))
@@ -274,7 +277,8 @@ def export_tiktok(item: dict, profile: dict) -> str:
     slug = re.sub(r"[^\w-]+", "-", item.get("title") or "short").strip("-").lower()[:50]
     target = dest / f"{time.strftime('%Y%m%d')}-{slug}-{item['id'][:4]}.mp4"
     shutil.copy2(root / item["file"], target)
-    caption = (item.get("caption") or item.get("title") or "") + "\n\n" + " ".join(item.get("hashtags") or [])
+    text, tags = tidy_post(item.get("caption") or "", item.get("hashtags"), limit=15)
+    caption = (text or item.get("title") or "") + "\n\n" + " ".join(tags)
     if item.get("source_channel"):
         caption += f"\n\nCredit: {item['source_channel']}"
     target.with_suffix(".txt").write_text(caption.strip() + "\n")

@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from .config import Settings
+from .picker import tidy_post
 from .transcribe import ENV_HZ
 
 
@@ -258,8 +259,8 @@ Write in the language of the video title. Return JSON."""
         for c, t in zip(clips, out.get("clips") or []):
             if str(t.get("title", "")).strip():
                 c["title"] = str(t["title"]).strip().strip('"')[:70]
-            if str(t.get("caption", "")).strip():
-                c["caption"] = str(t["caption"]).strip()
-            c["hashtags"] = [h if h.startswith("#") else "#" + h for h in (t.get("hashtags") or []) if h][:6]
+            caption, c["hashtags"] = tidy_post(str(t.get("caption", "")), t.get("hashtags"))
+            if caption:
+                c["caption"] = caption
     except Exception as e:  # AI offline or slow: keep the fallback titles
         log(f"  (titles: AI not available — using the video title: {e})")
