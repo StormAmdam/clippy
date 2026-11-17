@@ -28,6 +28,9 @@ $pyDir = Get-ChildItem $pyTmp -Directory |
 if (-not $pyDir) { throw "uv didn't install a Python folder" }
 Copy-Item -Recurse $pyDir.FullName (Join-Path $App "python")
 Remove-Item -Recurse -Force $pyTmp
+# uv marks its Pythons "externally managed" (pip refuses to touch them). This one belongs to the app alone, and the
+# app itself uses pip later (NVIDIA acceleration), so drop the marker.
+Get-ChildItem (Join-Path $App "python") -Recurse -Filter "EXTERNALLY-MANAGED" | Remove-Item -Force
 $Py = Join-Path $App "python\python.exe"
 & $Py -m pip --version 2>$null; if ($LASTEXITCODE) { Run $Py -m ensurepip }
 Run $Py -m pip install --disable-pip-version-check --no-warn-script-location --upgrade pip
