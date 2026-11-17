@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Your data: downloads, transcripts, finished clips, Autopilot/Review state, YouTube login, scans
+output/
+# Whisper model (downloads itself on first use)
+models/whisper/
+# Settings saved from the web UI (can hold API keys)
+settings.json
+# Your own sound effects
+sfx/
+
+# Made by tools/pack_for_move.py / unpacked from Clippy.zip (holds personal Claude Code notes)
+move-kit/
+Clippy.zip
+Clippy-extras.zip
+
+# Local AI-assistant tooling and session notes
+.agents/
+.claude/
+skills-lock.json
+.superpowers/
+docs/superpowers/

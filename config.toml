@@ -1,0 +1,50 @@
+# Clippy settings — uncomment and change what you want. Everything here is optional.
+# (The web UI options override these per video.)
+
+# ── The AI that picks the clips ─────────────────────────────────────────────
+# Any OpenAI-compatible server works. Default: your local llama.cpp server (free).
+# llm_url = "http://127.0.0.1:8080/v1"
+# llm_model = ""                 # empty = whatever is loaded
+# llm_api_key = ""
+#
+# Free cloud alternatives if you ever want them (still $0 on free tiers; model names
+# change often — check the provider's model list):
+#   Groq:   llm_url = "https://api.groq.com/openai/v1"   llm_api_key = "gsk_..."   llm_model = "llama-3.3-70b-versatile"
+#   Gemini: llm_url = "https://generativelanguage.googleapis.com/v1beta/openai"   llm_api_key = "..."   llm_model = "gemini-2.5-flash"
+#   Ollama: llm_url = "http://127.0.0.1:11434/v1"   llm_model = "qwen3:8b"
+
+# ── GPU ─────────────────────────────────────────────────────────────────────
+# Whisper needs ~2.6 GB of free VRAM. If a local LLM leaves less than that (typical on 6–8 GB cards),
+# Clippy pauses this systemd user service while transcribing, then starts it again right after.
+# llama_service = "llama-coder"
+# free_gpu_for_whisper = true     # false = never touch the service (Whisper falls back to CPU, ~10x slower)
+# whisper_model = "large-v3-turbo"
+
+# ── Clips ───────────────────────────────────────────────────────────────────
+# clips = 5
+# min_seconds = 20
+# max_seconds = 60
+# max_height = 1440               # source download quality (2160 = sharpest crops, bigger downloads)
+
+# ── Look ────────────────────────────────────────────────────────────────────
+# caption_style = "beast"         # beast (comic, bouncy) | hormozi (bold keywords) | box (highlight box) | clean
+# caption_scale = 1.0             # 1.2 = 20% bigger captions
+# highlight_color = "#FFE135"     # word being spoken
+# emphasis_color = "#3DFF7A"      # key words the AI picked
+# words_per_caption = 0           # 0 = style default
+# caption_y = 0.68                # 0 = top, 1 = bottom
+# title_seconds = 3.5             # hook title at the top (0 = off, -1 = whole clip)
+# emojis = true
+# progress_bar = true
+
+# ── Editing / energy ────────────────────────────────────────────────────────
+# teaser = true                   # open with the clip's best line as a flash-forward, whoosh, then start
+# motion = true                   # intro slam, slow push-ins, zoom punches on key words, zoom-blur transitions
+# punch_in = true                 # zoom alternation on jump cuts
+# sfx = true                      # whoosh / pop / impact (put your own in sfx/ as whoosh*.wav, pop*.wav, impact*.wav)
+# sfx_volume = 1.0
+# split_screen = true
+# remove_silences = true
+# max_pause = 0.45                # lower = faster pacing
+# loudness = -14.0
+# video_quality = 19

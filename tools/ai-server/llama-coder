@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# llama-coder: example launcher for the local AI server Clippy uses to pick clips (llama.cpp + CUDA).
+# Install: see tools/ai-server/README.md.
+#
+# Reference machine: RTX 3080 (10 GB VRAM), 8 performance cores, 32 GB RAM → ~1000 tok/s prompt, ~33 tok/s output.
+# Qwen3.6-35B-A3B is a Mixture-of-Experts model (35B total, ~3B active per token), so most expert weights
+# can live in system RAM. --fit puts as many layers on the GPU as fit while keeping LLAMA_CODER_FREE_MB
+# free (default 4500 MiB), so Whisper + NVENC can run next to it without Clippy having to pause it.
+# On a smaller GPU (≤ 8 GB) use a lower margin, e.g. LLAMA_CODER_FREE_MB=1024, and let Clippy pause the
+# service while it transcribes (free_gpu_for_whisper = true, the default).
+#
+# Override without editing:  LLAMA_CODER_CTX=32768 LLAMA_CODER_THREADS=6 llama-coder
+# Extra flags are passed through: llama-coder --verbose
+set -euo pipefail
+
+# Any GGUF chat model works; this one is a Qwen3.6-35B-A3B fine-tune with fewer refusals (IQ4_XS, 18.7 GB):
+# https://huggingface.co/mradermacher/Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF
+MODEL="${LLAMA_CODER_MODEL:-$HOME/models/Qwen3.6-35B-A3B-uncensored-heretic.i1-IQ4_XS.gguf}"
+CTX="${LLAMA_CODER_CTX:-65536}"
+PORT="${LLAMA_CODER_PORT:-8080}"
+LLAMA_DIR="${LLAMA_CPP_DIR:-$HOME/.local/opt/llama.cpp/current}"
+
+exec "$LLAMA_DIR/llama-server" \
+  --model "$MODEL" \
+  --alias qwen3.6-heretic \
+  --host 127.0.0.1 --port "$PORT" \
+  --ctx-size "$CTX" \
+  --parallel 1 \
+  --flash-attn on \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --fit on --fit-target "${LLAMA_CODER_FREE_MB:-4500}" \
+  --threads "${LLAMA_CODER_THREADS:-8}" \
+  --batch-size 2048 --ubatch-size 2048 \
+  --cache-ram 2048 \
+  --cors-origins localhost \
+  --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5 \
+  "$@"

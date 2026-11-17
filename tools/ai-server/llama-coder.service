@@ -1,0 +1,14 @@
+[Unit]
+Description=llama.cpp local AI server (llama-coder, used by Clippy)
+After=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/llama-coder
+Restart=on-failure
+RestartSec=5
+# Keep the desktop responsive while the model runs
+Nice=5
+
+[Install]
+WantedBy=default.target

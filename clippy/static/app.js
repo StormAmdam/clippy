@@ -1,0 +1,1057 @@
+"use strict";
+/* Clippy web UI — vanilla JS, no build step. */
+
+// ───────────────────────── helpers ─────────────────────────
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("clippy-" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("clippy-" + k, JSON.stringify(v)); } catch {} },
+};
+const finePointer = matchMedia("(pointer: fine)").matches;
+
+const ICONS = {
+  home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/>',
+  trophy: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  checkCircle: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  pencil: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  youtube: '<path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+  sparkles: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  chevR: '<path d="m9 18 6-6-6-6"/>',
+  chevL: '<path d="m15 18-6-6 6-6"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/>',
+  calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>',
+  external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+  sliders: '<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/>',
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  phone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  type: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/>',
+  smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>',
+  columns: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/>',
+  zoom: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/>',
+  mute: '<path d="M11 5 6 9H2v6h4l5 4V5Z"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/>',
+  progress: '<path d="M3 12h18"/><path d="M3 6h12"/><path d="M3 18h7"/>',
+  mic: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>',
+  chat: '<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>',
+  tv: '<rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/>',
+  ball: '<circle cx="12" cy="12" r="10"/><path d="M4.93 4.93c4.08 2.38 8.22 8.24 9.39 14.85"/><path d="M19.07 4.93c-4.08 2.38-8.22 8.24-9.39 14.85"/><path d="M2 12h20"/>',
+  briefcase: '<rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
+  laugh: '<circle cx="12" cy="12" r="10"/><path d="M18 13a6 6 0 0 1-6 5 6 6 0 0 1-6-5h12Z"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>',
+  flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  swords: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/>',
+  cpu: '<rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>',
+  gamepad: '<line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>',
+  power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  stop: '<rect width="14" height="14" x="5" y="5" rx="2"/>',
+};
+const icon = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
+function hydrateIcons(root = document) { $$("[data-icon]", root).forEach((el) => { el.innerHTML = icon(el.dataset.icon); el.removeAttribute("data-icon"); }); }
+
+async function apiErr(r) { try { const j = await r.json(); return new Error(j.detail || r.statusText); } catch { return new Error(r.statusText || "Request failed"); } }
+const api = {
+  async get(u) { const r = await fetch(u); if (!r.ok) throw await apiErr(r); return r.json(); },
+  async post(u, body) { const r = await fetch(u, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body ?? {})}); if (!r.ok) throw await apiErr(r); return r.json(); },
+  async del(u) { const r = await fetch(u, {method: "DELETE"}); if (!r.ok) throw await apiErr(r); return r.json(); },
+};
+function toast(msg, kind = "ok", action = null, ms = 4500) {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.innerHTML = icon(kind === "ok" ? "checkCircle" : kind === "bad" ? "alert" : "info") + `<span>${esc(msg)}</span>` +
+    (action ? `<button type="button" class="btn sm">${esc(action.label)}</button>` : "");
+  if (action) $("button", t).onclick = () => { action.run(); t.remove(); };
+  $("#toasts").appendChild(t);
+  setTimeout(() => { t.style.transition = "opacity .3s"; t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, ms);
+}
+const fail = (e) => toast(e.message || String(e), "bad");
+
+// formatting: the interface is English, so numbers and relative times are English too
+const NUM = new Intl.NumberFormat("en", {notation: "compact", maximumFractionDigits: 1});
+const fmt = (n) => NUM.format(+n || 0);
+const DATE = new Intl.DateTimeFormat("en", {dateStyle: "medium", timeStyle: "short"});
+const fmtDate = (ts) => ts ? DATE.format(new Date(ts * 1000)) : "–";
+const REL = new Intl.RelativeTimeFormat("en", {numeric: "auto"});
+function rel(ts) {
+  if (!ts) return "never";
+  const s = ts - Date.now() / 1000, a = Math.abs(s);
+  if (a < 60) return s < 0 ? "just now" : "any moment";
+  for (const [u, sec] of [["day", 86400], ["hour", 3600], ["minute", 60]]) if (a >= sec) return REL.format(Math.round(s / sec), u);
+  return "just now";
+}
+const fmtDur = (s) => { s = +s || 0; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}h ${m}m` : `${m}m`; };
+const fmtAge = (d) => d == null ? "–" : d < 1 ? `${Math.max(1, Math.round(d * 24))}h` : `${Math.round(d)}d`;
+const fmtBytes = (b) => { b = +b || 0; for (const [u, d] of [["GB", 1e9], ["MB", 1e6], ["KB", 1e3]]) if (b >= d) return (b / d).toFixed(b >= 10 * d ? 0 : 1) + " " + u; return b + " B"; };
+const scoreCls = (s) => s >= 85 ? "hi" : "";
+const everyLabel = (h) => !h ? "Only when you press Run" : h < 24 ? `Every ${h} hours` : h === 24 ? "Every day" : h === 168 ? "Every week" : `Every ${h / 24} days`;
+const initials = (s) => (s || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+
+const NICHES = {
+  "podcasts": ["mic", "Long talks, big opinions"], "interviews": ["chat", "Celebrities, experts, stories"],
+  "challenges": ["trophy", "MrBeast-style money and stunts"], "streamers": ["tv", "Kick and Twitch highlights"],
+  "sports": ["ball", "Athletes and sports talk"], "business": ["briefcase", "Money, hustle, founders"],
+  "comedy": ["laugh", "Stand-up and funny shows"], "motivation": ["flame", "Speeches and life advice"],
+  "debate": ["swords", "Heated arguments"], "true crime": ["search", "Cases and mysteries"],
+  "tech & ai": ["cpu", "AI, gadgets, tech talk"], "gaming": ["gamepad", "Gaming talk and videos"],
+};
+const nicheLabel = (n) => ({"tech & ai": "Tech & AI"}[n] || n[0].toUpperCase() + n.slice(1));
+const nicheIcon = (n) => icon((NICHES[n] || ["film"])[0]);
+const STYLES = [["beast", "Beast", "Comic, bouncy, tilted"], ["hormozi", "Hormozi", "Bold, colored keywords"], ["box", "Box", "Highlight box"], ["clean", "Clean", "Calm and minimal"]];
+const COLORS = ["#ffe135", "#3dff7a", "#ff4fd8", "#3ad8ff", "#ff8a1f", "#ffffff"];
+const LANGS = [["en", "English"], ["no", "Norwegian"], ["es", "Spanish"], ["de", "German"], ["fr", "French"], ["pt", "Portuguese"], ["any", "Any language"]];
+
+const state = {niches: null, overview: null, status: null, makeJob: null, lastResult: null, finder: null};
+
+// ───────────────────────── dialogs ─────────────────────────
+function openModal(html, {small = false, onClose = null, label = "Dialog"} = {}) {
+  closeModal(true);
+  const bg = document.createElement("div");
+  bg.className = "modal-bg"; bg.id = "modal";
+  bg.innerHTML = `<div class="modal ${small ? "small" : ""}" role="dialog" aria-modal="true" aria-label="${esc(label)}">${html}</div>`;
+  bg.addEventListener("mousedown", (e) => { if (e.target === bg) closeModal(); });
+  bg._onClose = onClose; bg._opener = document.activeElement;
+  document.body.appendChild(bg);
+  hydrateIcons(bg);
+  return bg;
+}
+async function closeModal(force = false) {
+  const m = $("#modal"); if (!m) return;
+  if (!force && m._onClose && (await m._onClose()) === false) return;   // e.g. "discard changes?" answered no
+  m.remove();
+  m._opener?.focus?.();
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#modal") && !$(".modal-bg[data-confirm]")) closeModal(); });
+
+function confirmDialog({title, body = "", confirm = "Confirm", danger = false}) {
+  return new Promise((resolve) => {
+    const prev = $("#modal");
+    if (prev) prev.style.visibility = "hidden";            // shown over an open dialog (e.g. the wizard)
+    const bg = document.createElement("div");
+    bg.className = "modal-bg"; bg.dataset.confirm = "1";
+    bg.innerHTML = `<div class="modal small" role="alertdialog" aria-modal="true" aria-labelledby="cfT">
+      <div class="mh"><h2 id="cfT">${esc(title)}</h2></div><div class="mb"><p class="muted" style="margin:6px 0 0">${body}</p></div>
+      <div class="mf"><span class="grow"></span><button type="button" class="btn quiet" data-no>Cancel</button>
+      <button type="button" class="btn ${danger ? "danger" : "primary"}" data-yes>${esc(confirm)}</button></div></div>`;
+    const done = (v) => { bg.remove(); if (prev) prev.style.visibility = ""; document.removeEventListener("keydown", key, true); resolve(v); };
+    const key = (e) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); done(false); } };
+    document.addEventListener("keydown", key, true);
+    $("[data-no]", bg).onclick = () => done(false);
+    $("[data-yes]", bg).onclick = () => done(true);
+    bg.addEventListener("mousedown", (e) => { if (e.target === bg) done(false); });
+    document.body.appendChild(bg);
+    $("[data-yes]", bg).focus();
+  });
+}
+
+// ───────────────────────── router ─────────────────────────
+const pages = {};
+let timers = [], leaveGuard = null, lastHash = location.hash;
+const repeat = (ms, fn) => timers.push(setInterval(fn, ms));
+const params = () => new URLSearchParams(location.hash.split("?")[1] || "");
+function setParam(k, v) { const p = params(); p.set(k, v); history.replaceState(null, "", `${location.hash.split("?")[0]}?${p}`); lastHash = location.hash; }
+const TITLES = {home: "Home", make: "Make Clips", find: "Find Videos", auto: "Autopilot", review: "Review", library: "Library", settings: "Settings"};
+async function route() {
+  let name = (location.hash.slice(1) || "home").split("?")[0];
+  if (name === "autopilot") name = "auto";
+  const page = pages[name] ? name : "home";
+  timers.forEach(clearInterval); timers = [];
+  leaveGuard = null;
+  $$("#nav a").forEach((a) => { const on = a.dataset.page === page; a.classList.toggle("on", on); if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  const el = $("#page");
+  el.innerHTML = "";
+  document.title = `${TITLES[page]} · Clippy`;
+  try { await pages[page](el); }
+  catch (e) { el.innerHTML = `<div class="panel empty"><div class="ic">${icon("alert")}</div><h3>This page couldn't load</h3><p>${esc(e.message)}. Reload the page; if it keeps happening, check the terminal running Clippy.</p></div>`; }
+  hydrateIcons(el);
+}
+window.addEventListener("hashchange", () => {
+  if (leaveGuard && leaveGuard() && !confirm("You have unsaved changes. Leave without saving?")) { history.replaceState(null, "", lastHash); return; }
+  lastHash = location.hash;
+  closeModal(true);
+  route(); window.scrollTo(0, 0);
+});
+window.addEventListener("beforeunload", (e) => { if (leaveGuard && leaveGuard()) { e.preventDefault(); e.returnValue = ""; } });
+
+// ───────────────────────── live status (rail) ─────────────────────────
+async function cancelJob(id) {
+  try { await api.post(`/api/jobs/${id}/cancel`); toast("Cancelling — it stops at the next step", "info"); refreshGlobal(); } catch (e) { fail(e); }
+}
+async function refreshGlobal() {
+  try {
+    const [st, ov] = await Promise.all([api.get("/api/status"), api.get("/api/overview")]);
+    state.status = st; state.overview = ov;
+    const n = ov.review.pending;
+    $("#navReview").textContent = n; $("#navReview").classList.toggle("hidden", !n);
+    const run = st.running;
+    $("#railStatus").innerHTML = `
+      <div class="line"><span class="dot ${st.llm ? "ok" : "bad"}"></span>Local AI ${st.llm ? "online" : "offline"}</div>
+      ${st.vram_free != null ? `<div class="line"><span class="dot ok"></span>GPU: ${(st.vram_free / 1024).toFixed(1)}&nbsp;GB free</div>` : ""}
+      ${run ? `<div class="onair"><div class="what"><span class="dot live"></span>${run.kind === "auto" ? "Autopilot on air" : "Making clips"}</div>
+        <div class="bar"><i style="width:${(run.pct * 100).toFixed(1)}%"></i></div><div class="msg">${esc(run.msg || "")}</div>
+        <button type="button" class="btn sm quiet" data-cancel="${run.id}">${icon("stop")} Cancel</button></div>`
+        : st.queued ? `<div class="onair"><div class="msg">${st.queued} job${st.queued > 1 ? "s" : ""} waiting</div></div>` : ""}`;
+    $$("[data-cancel]", $("#railStatus")).forEach((b) => b.onclick = () => cancelJob(b.dataset.cancel));
+  } catch {}
+}
+
+// ───────────────────────── shared renderers ─────────────────────────
+function clipCard(c) {
+  const post = [c.caption, (c.hashtags || []).join(" ")].filter(Boolean).join("\n\n");
+  return `<article class="clip">
+    <video src="/media/${encodeURI(c.file)}" ${c.thumb ? `poster="/media/${encodeURI(c.thumb)}"` : ""} controls preload="none" playsinline width="232" height="412"></video>
+    <div class="b">
+      <div class="row small muted"><span class="score ${scoreCls(c.score)}" title="AI score">${c.score ?? "–"}</span><span class="num">${Math.round(c.duration || 0)}&nbsp;s</span>
+        ${c.teaser ? `<span class="tag">${icon("zap")} Teaser</span>` : ""}</div>
+      <h3>${esc(c.title)}</h3>
+      ${post ? `<div class="cap">${esc(post)}</div>` : ""}
+      <div class="acts"><a class="btn sm" href="/media/${encodeURI(c.file)}" download>${icon("download")} Download</a>
+        ${post ? `<button type="button" class="btn sm" data-copy="${esc(post)}">${icon("copy")} Copy Caption</button>` : ""}</div>
+    </div></article>`;
+}
+function bindCopy(root) {
+  $$("[data-copy]", root).forEach((b) => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); toast("Caption copied"); } catch { toast("Couldn't copy — select the text and copy it yourself", "bad"); }
+  });
+}
+function stepper(steps, active, doneAll = false) {
+  return `<div class="stepper">${steps.map((s, i) => {
+    const cls = doneAll || i < active ? "done" : i === active ? "on" : "";
+    return `${i ? `<div class="ln ${doneAll || i <= active ? "done" : ""}"></div>` : ""}<div class="st ${cls}" ${cls === "on" ? 'aria-current="step"' : ""}><span class="n">${cls === "done" ? icon("check") : i + 1}</span><span class="lbl">${esc(s)}</span></div>`;
+  }).join("")}</div>`;
+}
+const emptyState = (ic, title, text, action = "") => `<div class="panel empty"><div class="ic">${icon(ic)}</div><h3>${esc(title)}</h3><p>${text}</p>${action}</div>`;
+
+async function reviewAction(id, act, extra = {}, after = () => route()) {
+  const res = await api.post("/api/review/" + id, {action: act, ...extra});
+  const undo = {label: "Undo", run: async () => { try { await api.post("/api/review/" + id, {action: "restore"}); toast("Moved back to Waiting"); refreshGlobal(); after(); } catch (e) { fail(e); } }};
+  if (act === "approve") toast("Approved — uploading in 10 seconds", "ok", undo, 9500);
+  else if (act === "reject") toast("Rejected", "ok", undo, 9500);
+  else if (act === "save") toast("Saved");
+  else if (act === "restore") toast("Moved back to Waiting");
+  refreshGlobal();
+  return res;
+}
+
+// ═════════════════════════ HOME ═════════════════════════
+pages.home = async (el) => {
+  const h = new Date().getHours();
+  const hello = h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  el.innerHTML = `
+    <div class="ph"><div><h1>${hello}</h1><p>What's waiting for you, and what Clippy is working on.</p></div></div>
+    <nav class="mob-links" aria-label="More"><a class="btn sm" href="#library">${icon("grid")} Library</a><a class="btn sm" href="#settings">${icon("sliders")} Settings</a></nav>
+    <form class="linkbar" id="hForm">
+      <input class="input big" id="hUrl" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="YouTube link or video file" placeholder="https://www.youtube.com/watch?v=…">
+      <button class="btn primary lg">${icon("scissors")} Make Clips</button></form>
+    <div class="monitor">
+      <section class="panel" aria-labelledby="upT"><div class="row between" style="margin-bottom:14px"><h2 id="upT" style="margin:0;font-size:18px">Up next</h2><span id="upCount"></span></div><div id="upBody"></div></section>
+      <div class="side-col"><section class="panel onair-panel" id="hAir" aria-live="polite"></section><div class="facts" id="hFacts" style="grid-template-columns:1fr"></div></div>
+    </div>
+    <div class="sec" id="hChannels"></div>
+    <div class="grid g2 sec">
+      <section class="panel"><h2>Recent activity</h2><p class="sub">Clip jobs and autopilot runs</p><div class="rows" id="hAct"></div></section>
+      <section class="panel"><h2>Recently published</h2><p class="sub">Shorts that went out</p><div class="rows" id="hUp"></div></section>
+    </div>`;
+  let upSig = "";
+  const loadUpNext = async () => {
+    let items; try { items = await api.get("/api/review?status=pending"); } catch { return; }
+    if (!$("#upBody")) return;
+    const sig = items.map((i) => i.id).join();
+    if (sig === upSig && $("#upBody").childElementCount) return;
+    upSig = sig;
+    $("#upCount").innerHTML = items.length ? `<span class="tag you">${items.length} waiting</span>` : "";
+    if (!items.length) {
+      $("#upBody").innerHTML = `<div class="empty" style="padding:26px 10px"><div class="ic">${icon("checkCircle")}</div><h3>Nothing waiting</h3>
+        <p>Paste a link above, or let a channel on Autopilot find something.</p><a class="btn" href="#auto">${icon("bot")} Open Autopilot</a></div>`;
+      return;
+    }
+    const i = items[0];
+    $("#upBody").innerHTML = `<div class="upnext">
+      <video src="/media/${encodeURI(i.file)}" ${i.thumb ? `poster="/media/${encodeURI(i.thumb)}"` : ""} controls preload="metadata" playsinline width="220" height="391"></video>
+      <div class="meta"><h3 class="break">${esc(i.title)}</h3>
+        <dl class="kv"><dt>Channel</dt><dd>${esc(i.profile_name)}</dd><dt>From</dt><dd><a href="${esc(i.source_url)}" target="_blank" rel="noopener">${esc(i.source_channel || "the source video")}</a></dd>
+          <dt>Length</dt><dd class="num">${Math.round(i.duration || 0)}&nbsp;s</dd><dt>AI score</dt><dd class="num">${i.score ?? "–"}</dd></dl>
+        <div class="row"><button type="button" class="btn primary" data-up="approve">${icon("check")} Approve &amp; Publish</button>
+          <button type="button" class="btn quiet danger" data-up="reject">${icon("x")} Reject</button>
+          ${items.length > 1 ? `<a class="btn quiet" href="#review">See All ${items.length}</a>` : ""}</div>
+        <p class="small faint" style="margin:0">To change the title or description first, open it in <a href="#review">Review</a>.</p></div></div>`;
+    $$("[data-up]", $("#upBody")).forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      try { await reviewAction(i.id, b.dataset.up, {}, () => { upSig = ""; loadUpNext(); }); upSig = ""; loadUpNext(); } catch (e) { fail(e); b.disabled = false; }
+    });
+  };
+  const load = async () => {
+    await refreshGlobal();
+    const o = state.overview, st = state.status; if (!o || !$("#hAir")) return;
+    const run = st?.running;
+    $("#hAir").innerHTML = run
+      ? `<div class="what"><span class="dot live"></span>${run.kind === "auto" ? "Autopilot: " + esc(run.url) : "Making clips"}</div>
+         <div class="bar" style="margin:12px 0 8px"><i style="width:${(run.pct * 100).toFixed(1)}%"></i></div>
+         <div class="small muted">${esc(run.msg || "")}</div>
+         <div class="row" style="margin-top:12px"><a class="btn sm" href="${run.kind === "auto" ? "#auto" : "#make"}">Open</a><button type="button" class="btn sm quiet" data-cancel="${run.id}">${icon("stop")} Cancel</button></div>`
+      : `<div class="what"><span class="dot ${st?.llm ? "ok" : "bad"}"></span>Nothing on air</div><p class="small muted" style="margin:8px 0 0">${st?.llm ? "Ready for the next video." : "The local AI is offline. Start llama-coder so Clippy can pick clips."}</p>`;
+    $$("[data-cancel]", $("#hAir")).forEach((b) => b.onclick = () => cancelJob(b.dataset.cancel));
+    $("#hFacts").innerHTML = `
+      <a class="fact ${o.review.pending ? "you" : ""}" href="#review"><div class="k">Waiting for you</div><div class="v">${o.review.pending}</div></a>
+      <div class="fact"><div class="k">Published this week</div><div class="v">${o.published_week}</div></div>
+      <div class="fact"><div class="k">Next automatic run</div><div class="v" style="font-size:24px">${o.next_run ? rel(o.next_run) : "None set"}</div></div>`;
+    $("#hAct").innerHTML = o.jobs.length ? o.jobs.map((j) => {
+      const [ic, cls, word] = {done: ["check", "ok", "Done"], error: ["alert", "err", "Failed"], running: ["refresh", "live", "Working"], cancelled: ["stop", "", "Cancelled"], interrupted: ["alert", "err", "Interrupted"]}[j.state] || ["clock", "", "Waiting"];
+      const title = j.kind === "auto" ? `Autopilot: ${j.url}` : (j.title || j.url);
+      const extra = j.state === "done" && j.clips != null ? `, ${j.clips} shorts` : j.state === "error" ? `: ${j.error || ""}` : "";
+      return `<div class="rowi"><div class="ic ${cls}">${icon(ic)}</div><div class="t"><b class="break">${esc(title)}</b><small>${word}${esc(extra)}, ${rel(j.finished || j.created)}</small></div></div>`;
+    }).join("") : `<p class="small muted">Nothing yet. Clip a video or run a channel.</p>`;
+    $("#hUp").innerHTML = o.uploads.length ? o.uploads.map((u) => `<a class="rowi" href="${esc(u.youtube?.url || "#")}" target="_blank" rel="noopener">
+        <div class="ic">${icon("youtube")}</div><div class="t"><b>${esc(u.title)}</b><small>${esc(u.profile_name)}, ${rel(u.uploaded)}</small></div>${icon("external", "faint")}</a>`).join("")
+      : `<p class="small muted">Nothing published yet. Approve shorts in <a href="#review">Review</a> to publish them.</p>`;
+  };
+  const loadChannels = async () => {
+    let ps; try { ps = await api.get("/api/auto/profiles"); } catch { return; }
+    if (!$("#hChannels")) return;
+    if (!ps.length) { $("#hChannels").innerHTML = ""; return; }
+    $("#hChannels").innerHTML = `<div class="sec-head"><h2>Channels on Autopilot</h2><a class="btn sm quiet" href="#auto">Manage</a></div>
+      <section class="panel" style="padding:6px 18px"><div class="rows">${ps.map((p) => `<div class="rowi">
+        <div class="avatar" style="width:36px;height:36px;font-size:15px">${p.youtube_status?.channel?.thumb ? `<img src="${esc(p.youtube_status.channel.thumb)}" alt="" width="36" height="36">` : esc(initials(p.name))}</div>
+        <div class="t"><b>${esc(p.name)}</b><small>${p.job ? "Running now" : p.auto_every_hours ? `${everyLabel(p.auto_every_hours)}${p.next_run ? `, next ${rel(p.next_run)}` : ""}` : "Runs when you press Run"}</small></div>
+        ${p.pending ? `<a class="tag you" href="#review">${p.pending} waiting</a>` : ""}
+        <button type="button" class="btn sm" data-run="${p.id}" ${p.job ? "disabled" : ""}>${icon("play")} Run Now</button></div>`).join("")}</div></section>`;
+    $$("[data-run]", $("#hChannels")).forEach((b) => b.onclick = async () => { b.disabled = true; try { await api.post(`/api/auto/profiles/${b.dataset.run}/run`); toast("Started — this takes a few minutes"); load(); } catch (e) { fail(e); b.disabled = false; } });
+  };
+  $("#hForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const url = $("#hUrl").value.trim(); if (!url) { $("#hUrl").focus(); return; }
+    try { const r = await api.post("/api/jobs", {url, options: {...MAKE_DEFAULTS, ...store.get("make", {})}}); state.makeJob = r.id; $("#hUrl").value = ""; toast("Started — follow it under On air"); load(); }
+    catch (err) { fail(err); }
+  };
+  await Promise.all([load(), loadUpNext(), loadChannels()]);
+  repeat(4000, load); repeat(6000, loadUpNext); repeat(8000, loadChannels);
+};
+
+// ═════════════════════════ MAKE CLIPS ═════════════════════════
+const MAKE_DEFAULTS = {clips: 5, min_seconds: 20, max_seconds: 60, caption_style: "beast", highlight_color: "#ffe135", title_seconds: 3.5,
+  teaser: true, sfx: true, motion: true, emojis: true, progress_bar: true, remove_silences: true, split_screen: true, punch_in: true, reuse_picks: false,
+  speech: "auto"};
+const SPEECH = [["auto", "Detect", "Clippy checks for talking itself"], ["on", "Has talking", "Podcasts, interviews, vlogs — picks by what's said"],
+  ["off", "No talking", "Music, gameplay, sport, satisfying — picks by sound & action, skips transcription"]];
+const EFFECTS = [
+  ["title_seconds", "type", "Hook title", "Big title at the top for the first seconds"],
+  ["teaser", "zap", "Teaser hook", "Opens with the best line, then whooshes into the clip"],
+  ["sfx", "music", "Sound effects", "Whoosh, pop and impact sounds"],
+  ["motion", "zoom", "Motion", "Intro slam, slow push-ins and zoom punches"],
+  ["emojis", "smile", "Emojis", "Emojis the AI picks pop above the captions"],
+  ["progress_bar", "progress", "Progress bar", "A thin bar at the top that fills up"],
+  ["remove_silences", "mute", "Cut silences", "Removes dead air for faster pacing"],
+  ["split_screen", "columns", "Split screen", "Stacks two people in podcast wide shots"],
+  ["punch_in", "zoom", "Punch-in on cuts", "A subtle zoom change on every jump cut"],
+];
+const JOB_STEPS = ["Download", "Transcribe", "Find best moments", "Edit and render"];
+const STAGE_IDX = {queued: 0, download: 0, transcribe: 1, pick: 2, render: 3, done: 4};
+
+pages.make = async (el) => {
+  const o = {...MAKE_DEFAULTS, ...store.get("make", {})};
+  el.innerHTML = `
+    <div class="ph"><div><h1>Make clips</h1><p>Paste a link. Clippy finds the best moments, reframes them to 9:16 and adds captions, effects and sound.</p></div></div>
+    <section class="panel">
+      <form class="linkbar" id="mForm"><input class="input big" id="mUrl" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="YouTube link or video file" placeholder="https://www.youtube.com/watch?v=…">
+        <button class="btn primary lg" id="mGo">${icon("sparkles")} Make Clips</button></form>
+      <p class="small faint" style="margin:10px 0 0">A local file path works too. It takes a few minutes, and you can leave this page while it works.</p>
+      <div id="mJob" style="margin-top:18px" class="hidden" aria-live="polite"></div>
+    </section>
+    <div class="sec"><div class="sec-head"><h2>Caption style</h2><span>How your captions look</span></div>
+      <div class="styles" id="mStyles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d]) => `<button type="button" role="radio" aria-checked="${o.caption_style === k}" class="style ${o.caption_style === k ? "on" : ""}" data-s="${k}">
+        <img src="/static/styles/${k}.jpg" alt="" width="360" height="640"><div><b>${n}</b><small>${d}</small></div></button>`).join("")}</div></div>
+    <div class="sec grid g2">
+      <section class="panel"><h2>Clips</h2><p class="sub">How many, and how long</p>
+        <label class="field"><span>Number of clips: <b id="mNum" class="num" style="color:var(--ink)">${o.clips}</b></span><input type="range" id="mClips" min="1" max="12" value="${o.clips}"></label>
+        <div class="grid g2" style="margin-top:14px">
+          <label class="field"><span>Shortest (seconds)</span><input class="input num" type="number" inputmode="numeric" id="mMin" min="5" max="170" value="${o.min_seconds}"></label>
+          <label class="field"><span>Longest (seconds)</span><input class="input num" type="number" inputmode="numeric" id="mMax" min="10" max="180" value="${o.max_seconds}"></label>
+        </div>
+        <div class="field" style="margin-top:16px"><span id="speechLbl">Talking in the video</span>
+          <div class="seg" id="mSpeech" role="radiogroup" aria-labelledby="speechLbl">${SPEECH.map(([v, l, d]) => `<button type="button" role="radio" aria-checked="${o.speech === v}" data-v="${v}" title="${esc(d)}" class="${o.speech === v ? "on" : ""}">${l}</button>`).join("")}</div>
+          <small class="hint" id="mSpeechHint" style="display:block;margin-top:8px">${esc((SPEECH.find((x) => x[0] === o.speech) || SPEECH[0])[2])}</small></div>
+        <div class="field" style="margin-top:16px"><span id="colorLbl">Highlight color</span>
+          <div class="swatches" id="mColors" role="radiogroup" aria-labelledby="colorLbl">${COLORS.map((c) => `<button type="button" role="radio" aria-checked="${o.highlight_color === c}" class="swatch ${o.highlight_color === c ? "on" : ""}" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join("")}
+          <label class="swatch custom ${COLORS.includes(o.highlight_color) ? "" : "on"}" id="mCustomL" title="Pick any color" style="--pick:${o.highlight_color}"><input type="color" id="mCustom" value="${o.highlight_color}" aria-label="Pick any color" style="position:absolute;opacity:0;width:0;height:0"></label></div></div>
+        <label class="switch" style="margin-top:16px"><span class="ic">${icon("refresh")}</span><span class="txt"><b>Reuse previous AI picks</b><small>Same video, new look — skips the AI step</small></span><input type="checkbox" id="mReuse" ${o.reuse_picks ? "checked" : ""}></label>
+      </section>
+      <section class="panel"><h2>Effects</h2><p class="sub">What makes a short hard to swipe past</p>
+        <div class="stack" id="mFx">${EFFECTS.map(([k, ic, t, d]) => `<label class="switch"><span class="ic">${icon(ic)}</span><span class="txt"><b>${t}</b><small>${d}</small></span>
+          <input type="checkbox" data-fx="${k}" ${(k === "title_seconds" ? o.title_seconds !== 0 : o[k]) ? "checked" : ""}></label>`).join("")}</div>
+      </section>
+    </div>
+    <div class="sec hidden" id="mResWrap"><div class="sec-head"><h2 id="mResTitle">Your clips</h2><span id="mResSub" class="break"></span></div><div class="clips" id="mRes"></div></div>`;
+
+  const save = () => store.set("make", o);
+  $$("#mStyles .style").forEach((b) => b.onclick = () => { o.caption_style = b.dataset.s; $$("#mStyles .style").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); }); save(); });
+  $("#mClips").oninput = (e) => { o.clips = +e.target.value; $("#mNum").textContent = o.clips; save(); };
+  $("#mMin").onchange = (e) => { o.min_seconds = +e.target.value; save(); };
+  $("#mMax").onchange = (e) => { o.max_seconds = +e.target.value; save(); };
+  const setColor = (c, custom) => {
+    o.highlight_color = c;
+    $$("#mColors .swatch").forEach((s) => { const on = custom ? s.id === "mCustomL" : s.dataset.c === c; s.classList.toggle("on", on); if (s.dataset.c) s.setAttribute("aria-checked", on); });
+    $("#mCustomL").style.setProperty("--pick", c); save();
+  };
+  $$("#mColors [data-c]").forEach((b) => b.onclick = () => setColor(b.dataset.c, false));
+  $("#mCustom").oninput = (e) => setColor(e.target.value, true);
+  $("#mReuse").onchange = (e) => { o.reuse_picks = e.target.checked; save(); };
+  $$("#mSpeech button").forEach((b) => b.onclick = () => {
+    o.speech = b.dataset.v;
+    $$("#mSpeech button").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); });
+    $("#mSpeechHint").textContent = (SPEECH.find((x) => x[0] === o.speech) || SPEECH[0])[2]; save();
+  });
+  $$("[data-fx]").forEach((cb) => cb.onchange = () => { const k = cb.dataset.fx; o[k] = k === "title_seconds" ? (cb.checked ? 3.5 : 0) : cb.checked; save(); });
+
+  const showResult = (res) => {
+    state.lastResult = res;
+    $("#mResWrap").classList.remove("hidden");
+    $("#mResTitle").textContent = `${res.clips.length} clips ready`;
+    $("#mResSub").textContent = res.title;
+    $("#mRes").innerHTML = res.clips.map(clipCard).join("");
+    bindCopy($("#mRes"));
+  };
+  if (state.lastResult) showResult(state.lastResult);
+
+  const watch = (id) => {
+    state.makeJob = id;
+    const box = $("#mJob"); box.classList.remove("hidden");
+    $("#mGo").disabled = true;
+    const tick = async () => {
+      let j; try { j = await api.get("/api/jobs/" + id); } catch { return; }
+      if (!$("#mJob")) return;
+      const live = j.state === "queued" || j.state === "running";
+      const idx = j.state === "done" ? 4 : STAGE_IDX[j.stage] ?? 0;
+      box.innerHTML = `${stepper(JOB_STEPS, idx, j.state === "done")}
+        ${live ? `<div class="bar ${j.state === "queued" ? "wait" : ""}"><i style="width:${(j.pct * 100).toFixed(1)}%"></i></div>
+        <div class="row between small" style="margin-top:8px"><span class="muted row" style="gap:8px">${j.state === "running" ? '<span class="dot live"></span>' : ""}${esc(j.state === "queued" ? "Waiting for the job before it to finish…" : j.msg)}</span>
+          <span class="row"><span class="muted num">${Math.round(j.pct * 100)}%</span><button type="button" class="btn sm quiet" id="mCancel">${icon("stop")} Cancel</button></span></div>` : ""}
+        ${j.state === "error" ? `<div class="note err"><div class="ic">${icon("alert")}</div><div><b>That didn't work</b><p>${esc(j.error)}</p></div></div>` : ""}
+        ${j.state === "cancelled" ? `<div class="note"><div class="ic">${icon("stop")}</div><div><b>Cancelled</b><p>Nothing was saved. Paste the link again to start over.</p></div></div>` : ""}
+        ${j.state === "interrupted" ? `<div class="note err"><div class="ic">${icon("alert")}</div><div><b>Interrupted</b><p>Clippy was closed while this ran. Paste the link again to restart it.</p></div></div>` : ""}`;
+      $("#mCancel", box)?.addEventListener("click", () => cancelJob(id));
+      if (!live) {
+        clearInterval(t); $("#mGo").disabled = false; state.makeJob = null;
+        if (j.state === "done") { showResult(j.result); toast(`${j.result.clips.length} clips ready`); refreshGlobal(); }
+      }
+    };
+    const t = setInterval(tick, 1000); timers.push(t); tick();
+  };
+  $("#mForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const url = $("#mUrl").value.trim();
+    if (!url) { $("#mUrl").focus(); return; }
+    $("#mGo").disabled = true;
+    try { const r = await api.post("/api/jobs", {url, options: o}); watch(r.id); } catch (err) { $("#mGo").disabled = false; fail(err); }
+  };
+  const pre = store.get("prefill", null);
+  if (pre) { store.set("prefill", null); $("#mUrl").value = pre; $("#mForm").requestSubmit(); return; }
+  if (state.makeJob) { watch(state.makeJob); return; }
+  try { const jobs = await api.get("/api/jobs"); const a = jobs.find((j) => (j.state === "running" || j.state === "queued") && j.kind === "clip"); if (a) watch(a.id); } catch {}
+};
+
+// ═════════════════════════ FIND VIDEOS ═════════════════════════
+pages.find = async (el) => {
+  if (!state.niches) state.niches = await api.get("/api/finder/niches");
+  const f = {niches: ["podcasts", "interviews", "challenges"], keywords: "", window: "week", duration: "long", lang: "en", cc_only: false, ...store.get("find", {})};
+  const wl = await api.get("/api/finder/watchlist").catch(() => []);
+  const seg = (id, val, opts) => `<div class="seg" id="${id}" role="radiogroup">${opts.map(([v, l]) => `<button type="button" role="radio" aria-checked="${val === v}" data-v="${v}" class="${val === v ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  el.innerHTML = `
+    <div class="ph"><div><h1>Find videos worth clipping</h1><p>Scans YouTube now and ranks videos by how fast they're growing, how far they beat their channel's size, engagement and length. No API key, nothing to pay.</p></div></div>
+    <section class="panel">
+      <div class="field"><span id="gLbl">Genres</span>
+        <div class="chips" id="fNiches" role="group" aria-labelledby="gLbl">${state.niches.map((n) => `<button type="button" class="chip ${f.niches.includes(n) ? "on" : ""}" aria-pressed="${f.niches.includes(n)}" data-n="${esc(n)}">${nicheIcon(n)}${esc(nicheLabel(n))}</button>`).join("")}</div></div>
+      <div class="grid" style="margin-top:18px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+        <label class="field"><span>Extra keywords</span><input class="input" id="fKw" name="keywords" autocomplete="off" value="${esc(f.keywords)}" placeholder="joe rogan, kai cenat…"></label>
+        <div class="field"><span>Uploaded</span>${seg("fWin", f.window, [["today", "Today"], ["week", "Week"], ["month", "Month"], ["year", "Year"]])}</div>
+        <div class="field"><span>Length</span>${seg("fDur", f.duration, [["any", "Any"], ["medium", "4–20 min"], ["long", "20+ min"]])}</div>
+        <label class="field"><span>Language</span><select class="input" id="fLang">${LANGS.map(([v, l]) => `<option value="${v}" ${f.lang === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      </div>
+      <div class="grid g2" style="margin-top:14px">
+        <label class="switch"><span class="ic">${icon("shield")}</span><span class="txt"><b>Creative Commons only</b><small>Only videos whose creator allows reuse</small></span><input type="checkbox" id="fCc" ${f.cc_only ? "checked" : ""}></label>
+        <details class="more"><summary>${icon("chevR")} Watchlist: channels to always check (${wl.length})</summary><div>
+          <textarea class="input" id="fWatch" rows="3" aria-label="Watchlist channels, one per line" placeholder="@MrBeast…">${esc(wl.map((x) => x.replace("https://www.youtube.com/", "")).join("\n"))}</textarea>
+          <div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="fSaveWatch">Save Watchlist</button><label class="row small muted" style="gap:6px"><input type="checkbox" id="fUseWatch" checked style="accent-color:var(--yellow)"> Include in scan</label></div></div></details>
+      </div>
+      <div class="row" style="margin-top:18px"><button type="button" class="btn primary lg" id="fScan">${icon("search")} Scan YouTube</button><span class="small faint" id="fWhen"></span></div>
+      <div id="fJob" class="hidden" style="margin-top:14px" aria-live="polite"><div class="bar"><i id="fBar"></i></div><div class="row between small" style="margin-top:8px"><span class="muted" id="fMsg">Starting…</span><span class="muted num" id="fPct"></span></div></div>
+    </section>
+    <div id="fOut"></div>`;
+  const save = () => store.set("find", f);
+  $$("#fNiches .chip").forEach((c) => c.onclick = () => { c.classList.toggle("on"); c.setAttribute("aria-pressed", c.classList.contains("on")); f.niches = $$("#fNiches .chip.on").map((x) => x.dataset.n); save(); });
+  for (const [id, key] of [["fWin", "window"], ["fDur", "duration"]]) $$(`#${id} button`).forEach((b) => b.onclick = () => { $$(`#${id} button`).forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); }); f[key] = b.dataset.v; save(); });
+  $("#fKw").onchange = (e) => { f.keywords = e.target.value; save(); };
+  $("#fLang").onchange = (e) => { f.lang = e.target.value; save(); };
+  $("#fCc").onchange = (e) => { f.cc_only = e.target.checked; save(); };
+  $("#fSaveWatch").onclick = async () => {
+    try { const r = await api.post("/api/finder/watchlist", {channels: $("#fWatch").value.split(/\n|,/).map((x) => x.trim()).filter(Boolean)}); toast(`Watchlist saved (${r.length} channels)`); } catch (e) { fail(e); }
+  };
+  let sortKey = "score", sortDir = -1;
+  const NUMCOLS = ["rank", "score", "views", "vpd", "breakout", "engagement", "duration", "days"];
+  const COLS = [["rank", "#"], [null, "Video"], ["score", "Score"], ["views", "Views"], ["vpd", "Views/day"], ["breakout", "Breakout"], ["engagement", "Engage"], ["duration", "Length"], ["days", "Age"], [null, ""]];
+  const table = () => {
+    const vids = [...(state.finder?.videos || [])].sort((a, b) => ((a[sortKey] ?? -1) - (b[sortKey] ?? -1)) * sortDir);
+    $$("#fOut th[data-k]").forEach((th) => { const on = th.dataset.k === sortKey; th.classList.toggle("sorted", on); if (on) th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending"); else th.removeAttribute("aria-sort"); });
+    $("#fBody").innerHTML = vids.map((v) => `<tr>
+      <td class="num faint">${v.rank}</td>
+      <td><div class="vid"><img src="https://i.ytimg.com/vi/${esc(v.id)}/mqdefault.jpg" alt="" width="112" height="63" loading="lazy"><div>
+        <a class="tt" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a>
+        <div class="cc">${esc(v.channel || "")}${v.subs ? `, ${fmt(v.subs)} subscribers` : ""}${v.clipped ? ' <span class="tag ok" style="margin-left:4px">Clipped</span>' : ""}</div>
+        <div class="whys">${(v.why || []).slice(0, 3).map((w) => `<span>${esc(w)}</span>`).join("")}</div></div></div></td>
+      <td class="num"><div class="meter" title="Clip score ${v.score} of 100"><div class="track"><div class="fill" style="width:${v.score}%"></div></div><b>${v.score}</b></div></td>
+      <td class="num">${fmt(v.views)}</td><td class="num">${fmt(v.vpd)}</td><td class="num">${v.breakout != null ? v.breakout.toFixed(1) + "×" : "–"}</td>
+      <td class="num">${(v.engagement * 100).toFixed(1)}%</td><td class="num">${fmtDur(v.duration)}</td><td class="num">${fmtAge(v.days)}</td>
+      <td><button type="button" class="btn primary sm" data-clip="${esc(v.id)}">${icon("scissors")} Clip It</button></td></tr>`).join("");
+    $$("#fBody [data-clip]").forEach((b) => b.onclick = () => { store.set("prefill", "https://www.youtube.com/watch?v=" + b.dataset.clip); location.hash = "make"; });
+  };
+  const render = (data) => {
+    state.finder = data;
+    const st = data.stats || {}, vids = data.videos || [];
+    $("#fWhen").textContent = data.created ? "Last scan " + rel(data.created) : "";
+    if (!vids.length) { $("#fOut").innerHTML = ""; return; }
+    const best = vids[0];
+    $("#fOut").innerHTML = `
+      <div class="facts sec">
+        <div class="fact"><div class="k">Videos ranked</div><div class="v">${st.scanned ?? vids.length}</div></div>
+        <div class="fact"><div class="k">Median views per day</div><div class="v">${fmt(st.median_vpd)}</div><div class="s">Fastest: ${fmt(st.top_vpd)}</div></div>
+        <div class="fact"><div class="k">Breakouts</div><div class="v">${st.breakouts ?? 0}</div><div class="s">3× or more their channel size</div></div>
+        <div class="fact"><div class="k">Reuse allowed</div><div class="v">${st.cc_count ?? 0}</div><div class="s">Creative Commons</div></div>
+        <div class="fact you"><div class="k">Top score</div><div class="v">${best.score}</div><div class="s break">${esc(best.channel || "")}</div></div>
+      </div>
+      <div class="grid g2 sec">
+        <section class="panel"><h2>Average score by genre</h2><p class="sub">Which genre is hottest right now</p>${(st.niches || []).map((n) => `<div class="hbar" title="${esc(nicheLabel(n.niche))}: average ${n.avg} over ${n.count} videos (best ${n.best})"><span>${esc(nicheLabel(n.niche))}</span><div class="track"><div class="fill" style="width:${n.avg}%"></div></div><span class="val num">${n.avg}</span></div>`).join("")}</section>
+        <section class="panel"><h2>Top channels</h2><p class="sub">Best performers in this scan</p><div class="rows">${(st.channels || []).slice(0, 7).map((c) => `<div class="rowi" style="padding:9px 2px"><div class="t"><b><a href="${esc(c.url || "#")}" target="_blank" rel="noopener" style="text-decoration:none">${esc(c.channel)}</a></b><small>${c.videos} video${c.videos > 1 ? "s" : ""}, ${fmt(c.views)} views</small></div><span class="score ${scoreCls(c.best)}">${c.best}</span></div>`).join("")}</div></section>
+      </div>
+      <div class="sec"><div class="sec-head"><h2>Leaderboard</h2><span>Sort by any column. Clip It sends the video to Make Clips.</span></div>
+        <div class="panel tablewrap"><table class="lb"><thead><tr>${COLS.map(([k, l]) => `<th scope="col" class="${NUMCOLS.includes(k) ? "num" : ""}" ${k ? `data-k="${k}"` : ""}>${k ? `<button type="button">${l}</button>` : l}</th>`).join("")}</tr></thead><tbody id="fBody"></tbody></table></div></div>`;
+    $$("#fOut th[data-k] button").forEach((b) => b.onclick = () => { const k = b.parentElement.dataset.k; if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = ["rank", "days", "duration"].includes(k) ? 1 : -1; } table(); });
+    table();
+  };
+  $("#fScan").onclick = async () => {
+    const body = {niches: f.niches, keywords: f.keywords, window: f.window, duration: f.duration, cc_only: f.cc_only, lang: f.lang, use_watchlist: $("#fUseWatch").checked};
+    $("#fScan").disabled = true; $("#fJob").classList.remove("hidden");
+    try {
+      const {id} = await api.post("/api/finder/scan", body);
+      const t = setInterval(async () => {
+        let s; try { s = await api.get("/api/finder/scan/" + id); } catch { return; }
+        if (!$("#fBar")) { clearInterval(t); return; }
+        $("#fBar").style.width = (s.pct * 100).toFixed(1) + "%"; $("#fPct").textContent = Math.round(s.pct * 100) + "%"; $("#fMsg").textContent = s.msg;
+        if (s.state !== "running") {
+          clearInterval(t); $("#fScan").disabled = false; $("#fJob").classList.add("hidden");
+          if (s.state === "done") { render(s.result); toast(`Ranked ${s.result.videos.length} videos`); } else fail(new Error(s.error));
+        }
+      }, 800);
+      timers.push(t);
+    } catch (e) { $("#fScan").disabled = false; $("#fJob").classList.add("hidden"); fail(e); }
+  };
+  const last = state.finder || await api.get("/api/finder/latest").catch(() => null);
+  if (last && last.videos) render(last);
+};
+
+// ═════════════════════════ AUTOPILOT ═════════════════════════
+const PROFILE_DEFAULTS = {name: "", language: "en", niches: [], keywords: "", window: "week", duration: "long", sources: [], source_mode: "safe",
+  caption_style: "beast", highlight_color: "#ffe135", videos_per_run: 1, clips_per_video: 3, min_seconds: 20, max_seconds: 60,
+  auto_every_hours: 24, youtube: true, tiktok: false, privacy: "public", spacing_hours: 4, category_id: "24",
+  description_template: "{caption}\n\n{hashtags} #Shorts\n\n🎥 Credit: {source_channel} — {source_url}", extra_hashtags: ""};
+const LENGTHS = [["short", "Short", "15–30 seconds", 15, 30], ["medium", "Medium", "20–60 seconds", 20, 60], ["long", "Long", "45–90 seconds", 45, 90]];
+const SCHEDULES = [[0, "Manual", "Only when you press Run"], [12, "Twice a day", "Every 12 hours"], [24, "Every day", "Once a day"], [48, "Every 2 days", "Every other day"], [168, "Every week", "Once a week"]];
+const SPACING = [[0, "Right away", "As soon as you approve"], [4, "Spread out", "One short every 4 hours"], [24, "One per day", "Steady daily posting"]];
+
+pages.auto = async (el) => {
+  const qs = new URLSearchParams(location.search);
+  let banner = "";
+  if (qs.get("yt")) {
+    const ok = qs.get("yt") === "connected";
+    banner = `<div class="note ${ok ? "ok" : "err"}" style="margin-bottom:16px"><div class="ic">${icon(ok ? "check" : "alert")}</div><div><b>${ok ? "YouTube connected" : qs.get("yt") === "cancelled" ? "YouTube sign-in was cancelled" : "YouTube sign-in failed"}</b><p>${ok ? "Approved shorts for this channel now upload automatically." : esc(qs.get("msg") || "Press Connect YouTube to try again.")}</p></div></div>`;
+    history.replaceState(null, "", "/#auto");
+  }
+  if (!state.niches) state.niches = await api.get("/api/finder/niches");
+  el.innerHTML = `
+    <div class="ph"><div><h1>Autopilot</h1><p>Put a channel on autopilot: Clippy finds great videos, makes shorts and lines them up. You approve, and it posts.</p></div>
+      <button type="button" class="btn primary lg" id="aNew">${icon("plus")} New Channel</button></div>
+    ${banner}<div id="aList"></div><div id="aSetup" class="sec"></div>`;
+  $("#aNew").onclick = () => openWizard(null);
+  const how = `<div class="steps5">
+      <div class="s"><div class="ic">${icon("search")}</div><b>Find</b><small>Scans YouTube in your genres and source channels</small></div>
+      <div class="s"><div class="ic">${icon("trophy")}</div><b>Pick the best</b><small>Ranks by views per day, breakout and engagement</small></div>
+      <div class="s"><div class="ic">${icon("film")}</div><b>Make shorts</b><small>Captions, effects and sound, fully edited</small></div>
+      <div class="s"><div class="ic">${icon("checkCircle")}</div><b>You approve</b><small>Watch, fix the title, approve or reject</small></div>
+      <div class="s"><div class="ic">${icon("youtube")}</div><b>Publish</b><small>Uploads to YouTube and saves files for TikTok</small></div></div>`;
+  let sig = "";
+  const load = async () => {
+    let ps, client;
+    try { [ps, client] = await Promise.all([api.get("/api/auto/profiles"), api.get("/api/youtube/client")]); } catch { return; }
+    if (!$("#aList")) return;
+    const s = JSON.stringify(ps) + client.has_client;
+    if (s !== sig) {
+      sig = s;
+      if (!ps.length) {
+        $("#aList").innerHTML = `<section class="panel"><div class="empty" style="padding:22px 10px 8px"><div class="ic">${icon("bot")}</div><h3>Put your first channel on autopilot</h3>
+          <p>Tell Clippy what your channel is about. Every day it finds a great video, makes shorts and waits for your OK.</p></div>${how}
+          <div class="row" style="justify-content:center;margin-top:22px"><button type="button" class="btn primary lg" id="aFirst">${icon("plus")} Create Your First Channel</button></div></section>`;
+        $("#aFirst").onclick = () => openWizard(null);
+      } else {
+        $("#aList").innerHTML = `<div class="stack" style="gap:16px">${ps.map(profileCard).join("")}</div>
+          <details class="more sec"><summary>${icon("chevR")} How Autopilot works</summary><div>${how}</div></details>`;
+        bindProfiles(ps);
+      }
+    }
+    renderSetup(ps, client);
+  };
+  await load(); repeat(3000, load);
+};
+
+function profileCard(p) {
+  const yt = p.youtube_status || {}, job = p.job;
+  const phase = !job ? -1 : job.state === "queued" ? 0 : job.pct < 0.2 ? (job.pct < 0.15 ? 0 : 1) : 2;
+  const done = (i) => p.last_run > 0 && (phase === -1 || i < phase);
+  const ytNeeds = p.youtube && !yt.connected;
+  const node = (ic, title, sub, cls) => `<div class="pn ${cls}"><div class="c">${icon(ic)}</div><b>${title}</b><small>${sub}</small></div>`;
+  const pubSub = p.published ? `${p.published} published` : ytNeeds ? "Needs YouTube" : p.youtube ? "Ready" : p.tiktok ? "TikTok files" : "Off";
+  const pipe = `<div class="pipe">
+    ${node("search", "Find", phase === 0 ? (job.state === "queued" ? "Waiting…" : "Scanning…") : p.last_run ? rel(p.last_run) : "Not run yet", phase === 0 ? "live" : done(0) ? "done" : "")}
+    ${node("trophy", "Pick best", phase === 1 ? "Ranking…" : `${p.used_count} used`, phase === 1 ? "live" : done(1) ? "done" : "")}
+    ${node("film", "Make shorts", phase === 2 ? Math.round(job.pct * 100) + "%" : `${p.videos_per_run}×${p.clips_per_video} per run`, phase === 2 ? "live" : done(2) ? "done" : "")}
+    ${node("checkCircle", "You review", p.pending ? `${p.pending} waiting` : "All clear", p.pending ? "you" : p.last_run ? "done" : "")}
+    ${node(p.youtube ? "youtube" : "phone", "Publish", pubSub, ytNeeds ? "you" : p.published ? "done" : "")}</div>`;
+  const status = job ? `<span class="tag live"><span class="dot live" style="box-shadow:none"></span>${job.state === "queued" ? "Queued" : "Running"}</span>`
+    : p.auto_every_hours ? `<span class="tag ok">${icon("clock")} ${everyLabel(p.auto_every_hours)}</span>` : `<span class="tag">${icon("play")} Manual</span>`;
+  let mid = "";
+  if (job) mid = `<div class="bar ${job.state === "queued" ? "wait" : ""}"><i style="width:${(job.pct * 100).toFixed(1)}%"></i></div><div class="row between small" style="margin-top:8px"><span class="muted">${esc(job.state === "queued" ? "Waiting for the GPU — another job is running…" : job.msg)}</span><button type="button" class="btn sm quiet" data-cancel="${job.id}">${icon("stop")} Cancel</button></div>`;
+  else if (p.last_error) mid = `<div class="note err"><div class="ic">${icon("alert")}</div><div><b>The last run didn't finish</b><p>${esc(p.last_error)}</p></div></div>`;
+  else if (ytNeeds) mid = `<div class="note you"><div class="ic">${icon("youtube")}</div><div style="flex:1"><b>Connect YouTube to publish automatically</b><p>Until then, approved shorts can't upload. The steps are under “Connect YouTube” below.</p></div></div>`;
+  else if (p.pending) mid = `<div class="note you"><div class="ic">${icon("checkCircle")}</div><div style="flex:1"><b>${p.pending} new short${p.pending > 1 ? "s" : ""} waiting for you</b><p>Watch them and approve the good ones.</p></div><a class="btn sm primary" href="#review">Review Now</a></div>`;
+  const av = yt.channel?.thumb ? `<img src="${esc(yt.channel.thumb)}" alt="" width="44" height="44">` : esc(initials(p.name));
+  const genres = (p.niches || []).map(nicheLabel).join(", ") || "Source channels only";
+  return `<article class="panel profile" aria-label="${esc(p.name)}">
+    <div class="top"><div class="avatar">${av}</div>
+      <div class="name"><b>${esc(p.name)}</b><small>${esc(genres)}${p.sources.length ? `; ${p.sources.length} source channel${p.sources.length > 1 ? "s" : ""}` : ""}</small></div>
+      ${status}</div>
+    ${pipe}${mid ? `<div class="mid">${mid}</div>` : ""}
+    <div class="foot">
+      <div class="info"><span>${icon(p.source_mode === "safe" ? "shield" : "alert")} ${p.source_mode === "safe" ? "Safe sources" : "Any video"}</span>
+        <span>${icon("youtube")} ${p.youtube ? (yt.connected ? esc(yt.channel?.title || "Connected") : "Not connected") : "YouTube off"}</span>
+        ${p.tiktok ? `<span>${icon("phone")} TikTok files</span>` : ""}${p.next_run ? `<span>${icon("calendar")} Next run ${rel(p.next_run)}</span>` : ""}</div>
+      <button type="button" class="btn primary" data-run="${p.id}" ${job ? "disabled" : ""}>${icon("play")} Run Now</button>
+      ${ytNeeds ? `<a class="btn" href="/api/youtube/connect/${p.id}" data-connect>${icon("youtube")} Connect YouTube</a>` : ""}
+      <button type="button" class="btn" data-edit="${p.id}">${icon("pencil")} Edit</button>
+      ${p.youtube && yt.connected ? `<button type="button" class="btn quiet icon" data-disc="${p.id}" aria-label="Disconnect YouTube from ${esc(p.name)}" title="Disconnect YouTube">${icon("link")}</button>` : ""}
+      <button type="button" class="btn quiet icon danger" data-del="${p.id}" aria-label="Delete ${esc(p.name)}" title="Delete channel">${icon("trash")}</button>
+    </div></article>`;
+}
+
+function bindProfiles(ps) {
+  $$("#aList [data-run]").forEach((b) => b.onclick = async () => { b.disabled = true; try { await api.post(`/api/auto/profiles/${b.dataset.run}/run`); toast("Started — this takes a few minutes"); refreshGlobal(); } catch (e) { fail(e); b.disabled = false; } });
+  $$("#aList [data-cancel]").forEach((b) => b.onclick = () => cancelJob(b.dataset.cancel));
+  $$("#aList [data-edit]").forEach((b) => b.onclick = () => openWizard(ps.find((p) => p.id === b.dataset.edit)));
+  $$("#aList [data-connect]").forEach((a) => a.onclick = async (e) => {
+    const c = await api.get("/api/youtube/client").catch(() => ({}));
+    if (!c.has_client) { e.preventDefault(); toast("First do steps 1 and 2 under “Connect YouTube”", "info"); $("#aSetup")?.scrollIntoView({behavior: "smooth"}); }
+  });
+  $$("#aList [data-disc]").forEach((b) => b.onclick = async () => {
+    if (!await confirmDialog({title: "Disconnect YouTube?", body: "Approved shorts won't upload until you connect again.", confirm: "Disconnect", danger: true})) return;
+    try { await api.post(`/api/youtube/disconnect/${b.dataset.disc}`); toast("YouTube disconnected"); } catch (e) { fail(e); }
+  });
+  $$("#aList [data-del]").forEach((b) => b.onclick = async () => {
+    const p = ps.find((x) => x.id === b.dataset.del);
+    if (!await confirmDialog({title: `Delete “${p.name}”?`, body: "The channel's settings are removed. Shorts it made stay in your output folder.", confirm: "Delete Channel", danger: true})) return;
+    try { await api.del(`/api/auto/profiles/${p.id}`); toast("Channel deleted"); } catch (e) { fail(e); }
+  });
+}
+
+function renderSetup(ps, client) {
+  const yts = ps.filter((p) => p.youtube);
+  const allConnected = yts.length > 0 && yts.every((p) => p.youtube_status?.connected);
+  const doneCount = (client.has_client ? 2 : 0) + (allConnected ? 1 : 0);
+  const box = $("#aSetup"); if (!box) return;
+  const s = `${client.has_client}|${allConnected}|${yts.length}`;
+  if (box.dataset.sig === s) return;
+  box.dataset.sig = s;
+  box.innerHTML = `<section class="panel">
+    <div class="row between"><div><h2 style="margin:0;font-size:18px">Connect YouTube</h2><p class="sub" style="margin:2px 0 0">One-time setup so Clippy can upload for you. Free, about 10 minutes.</p></div>
+      <span class="tag ${doneCount === 3 ? "ok" : "you"}">${doneCount} of 3 done</span></div>
+    <div style="margin-top:8px">
+      <div class="check ${client.has_client ? "done" : ""}"><span class="n">${client.has_client ? icon("check") : 1}</span><div class="t"><b>Create a free Google Cloud project</b>
+        <p>Open <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a> and create a project called “Clippy”. Enable the
+        <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">YouTube Data API v3</a>. On the
+        <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" rel="noopener">OAuth consent screen</a>, choose <b>External</b> and add your channel's Google account as a <b>test user</b>.</p></div></div>
+      <div class="check ${client.has_client ? "done" : ""}"><span class="n">${client.has_client ? icon("check") : 2}</span><div class="t"><b>Download your key file and add it here</b>
+        <p>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Credentials</a>, then Create credentials → OAuth client ID → <b>Desktop app</b> → Download JSON.</p>
+        <div class="row" style="margin-top:10px"><label class="btn sm">${icon("upload")} ${client.has_client ? "Replace Key File" : "Choose Key File"}<input type="file" id="aClient" accept=".json,application/json" hidden></label>
+          ${client.has_client ? `<span class="tag ok">${icon("check")} Key file added</span>` : ""}</div></div></div>
+      <div class="check ${allConnected ? "done" : ""}"><span class="n">${allConnected ? icon("check") : 3}</span><div class="t"><b>Connect each channel</b>
+        <p>Press <b>Connect YouTube</b> on a channel above and sign in with that channel's Google account.${yts.length ? ` ${yts.filter((p) => p.youtube_status?.connected).length} of ${yts.length} connected.` : ""}</p></div></div>
+    </div>
+    <div class="note" style="margin-top:14px"><div class="ic">${icon("info")}</div><div><b>Good to know</b><p>Google's free quota allows about 6 uploads a day. Videos from a new, unverified Google project stay <b>private</b> until Google approves it in a free API audit — until then, press publish in YouTube Studio. For TikTok, Clippy saves the video and caption for you to post from your phone.</p></div></div>
+  </section>`;
+  $("#aClient").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    let data; try { data = JSON.parse(await f.text()); } catch { fail(new Error("That file isn't JSON. Download the key file again")); return; }
+    try { await api.post("/api/youtube/client", data); toast("Key file added — now press Connect YouTube on a channel"); box.dataset.sig = ""; } catch (err) { fail(err); }
+  };
+}
+
+// ── the wizard ──
+const WZ_STEPS = ["Channel", "Content", "Sources", "Style", "Publishing", "Summary"];
+function openWizard(existing) {
+  const p = {...PROFILE_DEFAULTS, ...(existing || {})};
+  p.sources = [...(p.sources || [])].map((s) => s.replace("https://www.youtube.com/", ""));
+  p.niches = [...(p.niches || [])];
+  const initial = JSON.stringify(p);
+  let step = 0;
+  const lenKey = () => (LENGTHS.find((l) => l[3] === p.min_seconds && l[4] === p.max_seconds) || [null])[0];
+  const m = openModal(`<div class="mh"><div class="row between"><h2>${existing ? "Edit " + esc(existing.name) : "New autopilot channel"}</h2>
+      <button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div><div id="wzStep"></div></div>
+    <div class="mb" id="wzBody"></div>
+    <div class="mf"><button type="button" class="btn quiet" id="wzBack">${icon("chevL")} Back</button><span class="grow small faint" id="wzCount"></span><span class="err-text" id="wzErr" role="alert"></span>
+      <button type="button" class="btn primary" id="wzNext"></button></div>`,
+    {label: "Channel setup", onClose: async () => JSON.stringify(p) === initial || await confirmDialog({title: "Discard your changes?", body: "What you entered in this setup will be lost.", confirm: "Discard", danger: true})});
+  $("[data-close]", m).onclick = () => closeModal();
+  const choice = (on, ic, title, sub, attrs) => `<button type="button" class="choice ${on ? "on" : ""}" aria-pressed="${on}" ${attrs}><span class="tick">${icon("check")}</span>${ic ? `<span class="ci">${icon(ic)}</span>` : ""}<b>${title}</b>${sub ? `<small>${sub}</small>` : ""}</button>`;
+  const valid = () => {
+    if (step === 0) return p.name.trim().length > 0 || "Give your channel a name.";
+    if (step === 1) return p.niches.length > 0 || p.keywords.trim().length > 0 || p.sources.length > 0 || "Pick at least one genre, or type keywords.";
+    if (step === 2) return p.source_mode === "any" || p.sources.length > 0 || p.niches.length > 0 || "Add a source channel.";
+    if (step === 4) return p.youtube || p.tiktok || "Choose where shorts should go.";
+    return true;
+  };
+  const body = () => {
+    const b = $("#wzBody", m);
+    $("#wzErr", m).textContent = "";
+    if (step === 0) {
+      b.innerHTML = `<label for="wzName" class="wz-q" style="display:block">What's your channel called?</label><p class="wz-help">Only you see this. It helps you tell your channels apart.</p>
+        <input class="input big" id="wzName" name="channel-name" autocomplete="off" value="${esc(p.name)}" placeholder="Daily Podcast Clips…" maxlength="60">
+        <p class="wz-q" style="margin-top:28px">What language are your shorts in?</p><p class="wz-help">Clippy only picks videos in this language.</p>
+        <div class="choices">${LANGS.map(([v, l]) => choice(p.language === v, "", l, "", `data-lang="${v}"`)).join("")}</div>`;
+      const inp = $("#wzName", b); inp.oninput = () => { p.name = inp.value; };
+      if (finePointer) setTimeout(() => inp.focus(), 50);
+      inp.onkeydown = (e) => { if (e.key === "Enter") $("#wzNext", m).click(); };
+      $$("[data-lang]", b).forEach((c) => c.onclick = () => { p.language = c.dataset.lang; body(); });
+    } else if (step === 1) {
+      b.innerHTML = `<p class="wz-q">What should Clippy look for?</p><p class="wz-help">Pick one or more genres. Clippy searches YouTube for the hottest videos in them.</p>
+        <div class="choices">${state.niches.map((n) => choice(p.niches.includes(n), (NICHES[n] || ["film"])[0], nicheLabel(n), (NICHES[n] || ["", ""])[1], `data-n="${esc(n)}"`)).join("")}</div>
+        <label class="field" style="margin-top:22px"><span>Anything specific? (optional)</span><input class="input" id="wzKw" autocomplete="off" value="${esc(p.keywords)}" placeholder="joe rogan, nba, ai news…"></label>
+        <details class="more" style="margin-top:14px"><summary>${icon("chevR")} More options</summary><div class="grid g2">
+          <div class="field"><span>Only videos uploaded in the last</span><div class="seg" id="wzWin">${[["today", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"]].map(([v, l]) => `<button type="button" data-v="${v}" class="${p.window === v ? "on" : ""}">${l}</button>`).join("")}</div></div>
+          <div class="field"><span>Video length</span><div class="seg" id="wzDur">${[["any", "Any"], ["medium", "4–20 min"], ["long", "20+ min"]].map(([v, l]) => `<button type="button" data-v="${v}" class="${p.duration === v ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        </div></details>`;
+      $$("[data-n]", b).forEach((c) => c.onclick = () => { const n = c.dataset.n; p.niches = p.niches.includes(n) ? p.niches.filter((x) => x !== n) : [...p.niches, n]; c.classList.toggle("on"); c.setAttribute("aria-pressed", c.classList.contains("on")); });
+      $("#wzKw", b).oninput = (e) => { p.keywords = e.target.value; };
+      for (const [id, key] of [["wzWin", "window"], ["wzDur", "duration"]]) $$(`#${id} button`, b).forEach((x) => x.onclick = () => { p[key] = x.dataset.v; $$(`#${id} button`, b).forEach((y) => y.classList.toggle("on", y === x)); });
+    } else if (step === 2) {
+      b.innerHTML = `<p class="wz-q">Where may Clippy take videos from?</p><p class="wz-help">Reposting other people's videos without permission gets channels struck. Safe mode keeps you out of trouble.</p>
+        <div class="choices wide">
+          ${choice(p.source_mode === "safe", "shield", "Safe (recommended)", "Only the source channels you list below, plus Creative Commons videos (reuse allowed) from your genres. A credit line is added automatically.", 'data-mode="safe"')}
+          ${choice(p.source_mode === "any", "alert", "Any video", "Any video from your genres. Choose this only if you have the rights or permission — otherwise expect copyright claims.", 'data-mode="any"')}
+        </div>
+        <label for="wzSrc" class="wz-q" style="display:block;margin-top:26px;font-size:19px">Source channels${p.source_mode === "safe" ? "" : " (optional)"}</label>
+        <p class="wz-help">Creators you're allowed to clip — many run clipping programs. Clippy always checks their newest uploads.</p>
+        <form class="row" id="wzAdd"><input class="input" id="wzSrc" autocomplete="off" spellcheck="false" placeholder="@channelname…" style="flex:1"><button class="btn">${icon("plus")} Add Channel</button></form>
+        <div class="stack" style="margin-top:12px;gap:8px">${p.sources.map((s, i) => `<div class="srcrow">${icon("youtube")}<span>${esc(s)}</span><button type="button" class="btn quiet icon sm" data-rm="${i}" aria-label="Remove ${esc(s)}">${icon("x")}</button></div>`).join("") || `<p class="small faint">No source channels yet.${p.source_mode === "safe" ? " Without any, Clippy only uses Creative Commons videos from your genres." : ""}</p>`}</div>`;
+      $$("[data-mode]", b).forEach((c) => c.onclick = () => { p.source_mode = c.dataset.mode; body(); });
+      $("#wzAdd", b).onsubmit = (e) => {
+        e.preventDefault(); const v = $("#wzSrc", b).value.trim(); if (!v) return;
+        const handle = v.replace(/^https?:\/\/(www\.)?youtube\.com\//, "").replace(/\/(videos|featured|shorts)\/?$/, "");
+        const h2 = handle.startsWith("@") || handle.includes("/") ? handle : "@" + handle;
+        if (!p.sources.includes(h2)) p.sources.push(h2);
+        body(); $("#wzSrc", m)?.focus();
+      };
+      $$("[data-rm]", b).forEach((x) => x.onclick = () => { p.sources.splice(+x.dataset.rm, 1); body(); });
+    } else if (step === 3) {
+      b.innerHTML = `<p class="wz-q">How should the shorts look?</p><p class="wz-help">Pick a caption style. You can change it any time.</p>
+        <div class="styles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d]) => `<button type="button" role="radio" aria-checked="${p.caption_style === k}" class="style ${p.caption_style === k ? "on" : ""}" data-s="${k}"><img src="/static/styles/${k}.jpg" alt="" width="360" height="640"><div><b>${n}</b><small>${d}</small></div></button>`).join("")}</div>
+        <div class="grid g2" style="margin-top:22px">
+          <div class="field"><span>Highlight color</span><div class="swatches">${COLORS.map((c) => `<button type="button" class="swatch ${p.highlight_color === c ? "on" : ""}" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join("")}</div></div>
+          <div class="field"><span>Shorts per run</span><div class="seg" id="wzClips">${[1, 2, 3, 5].map((n) => `<button type="button" data-v="${n}" class="${p.clips_per_video === n ? "on" : ""}">${n}</button>`).join("")}</div>
+            <div class="hint">From the best new video each run</div></div>
+        </div>
+        <div class="field" style="margin-top:20px"><span>Short length</span><div class="choices">${LENGTHS.map(([k, n, d]) => choice(lenKey() === k, "", n, d, `data-len="${k}"`)).join("")}</div></div>`;
+      $$("[data-s]", b).forEach((c) => c.onclick = () => { p.caption_style = c.dataset.s; $$("[data-s]", b).forEach((x) => { x.classList.toggle("on", x === c); x.setAttribute("aria-checked", x === c); }); });
+      $$("[data-c]", b).forEach((c) => c.onclick = () => { p.highlight_color = c.dataset.c; $$("[data-c]", b).forEach((x) => x.classList.toggle("on", x === c)); });
+      $$("#wzClips button", b).forEach((x) => x.onclick = () => { p.clips_per_video = +x.dataset.v; $$("#wzClips button", b).forEach((y) => y.classList.toggle("on", y === x)); });
+      $$("[data-len]", b).forEach((c) => c.onclick = () => { const l = LENGTHS.find((x) => x[0] === c.dataset.len); p.min_seconds = l[3]; p.max_seconds = l[4]; body(); });
+    } else if (step === 4) {
+      b.innerHTML = `<p class="wz-q">How often should it run?</p><p class="wz-help">Each run finds a new video and makes shorts for you to review. Runs happen while Clippy is running — turn on “Start at login” in Settings to keep it running.</p>
+        <div class="choices">${SCHEDULES.map(([h, n, d]) => choice(p.auto_every_hours === h, "", n, d, `data-every="${h}"`)).join("")}</div>
+        <p class="wz-q" style="margin-top:26px">Where should approved shorts go?</p><p class="wz-help">Nothing is posted until you approve it in Review.</p>
+        <div class="grid g2">
+          <label class="switch"><span class="ic">${icon("youtube")}</span><span class="txt"><b>YouTube Shorts</b><small>Uploads automatically after you approve</small></span><input type="checkbox" id="wzYt" ${p.youtube ? "checked" : ""}></label>
+          <label class="switch"><span class="ic">${icon("phone")}</span><span class="txt"><b>TikTok</b><small>Saves the video and caption to post from your phone</small></span><input type="checkbox" id="wzTt" ${p.tiktok ? "checked" : ""}></label>
+        </div>
+        <div id="wzYtOpts" class="${p.youtube ? "" : "hidden"}">
+          <p class="wz-q" style="margin-top:26px;font-size:19px">When should YouTube shorts go live?</p>
+          <div class="choices">${SPACING.map(([h, n, d]) => choice(p.spacing_hours === h, "", n, d, `data-space="${h}"`)).join("")}</div>
+          <details class="more" style="margin-top:16px"><summary>${icon("chevR")} Advanced YouTube options</summary><div class="stack">
+            <div class="grid g2"><label class="field"><span>Visibility</span><select class="input" id="wzPriv">${[["public", "Public"], ["unlisted", "Unlisted"], ["private", "Private"]].map(([v, l]) => `<option value="${v}" ${p.privacy === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+              <label class="field"><span>Category</span><select class="input" id="wzCat">${[["24", "Entertainment"], ["22", "People & Blogs"], ["17", "Sports"], ["23", "Comedy"], ["27", "Education"], ["28", "Science & Technology"], ["20", "Gaming"], ["25", "News & Politics"]].map(([v, l]) => `<option value="${v}" ${p.category_id === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+            <label class="field"><span>Description template</span><textarea class="input" id="wzDesc" rows="4">${esc(p.description_template)}</textarea><div class="hint">Placeholders: {caption} {hashtags} {title} {source_channel} {source_url}</div></label>
+            <label class="field"><span>Extra hashtags</span><input class="input" id="wzTags" autocomplete="off" value="${esc(p.extra_hashtags)}" placeholder="#podcast #clips…"></label>
+          </div></details></div>`;
+      $$("[data-every]", b).forEach((c) => c.onclick = () => { p.auto_every_hours = +c.dataset.every; $$("[data-every]", b).forEach((x) => x.classList.toggle("on", x === c)); });
+      $$("[data-space]", b).forEach((c) => c.onclick = () => { p.spacing_hours = +c.dataset.space; $$("[data-space]", b).forEach((x) => x.classList.toggle("on", x === c)); });
+      $("#wzYt", b).onchange = (e) => { p.youtube = e.target.checked; $("#wzYtOpts", b).classList.toggle("hidden", !p.youtube); };
+      $("#wzTt", b).onchange = (e) => { p.tiktok = e.target.checked; };
+      $("#wzPriv", b).onchange = (e) => { p.privacy = e.target.value; };
+      $("#wzCat", b).onchange = (e) => { p.category_id = e.target.value; };
+      $("#wzDesc", b).oninput = (e) => { p.description_template = e.target.value; };
+      $("#wzTags", b).oninput = (e) => { p.extra_hashtags = e.target.value; };
+    } else {
+      const where = [p.youtube && "YouTube Shorts", p.tiktok && "TikTok (saved for your phone)"].filter(Boolean).join(" and ");
+      const len = LENGTHS.find((l) => l[0] === lenKey());
+      const lines = [
+        ["calendar", "When", `<b>${everyLabel(p.auto_every_hours)}</b>${p.auto_every_hours ? ", while Clippy is running," : ""} a new run starts.`],
+        ["search", "Find", `It searches ${p.niches.length ? `<b>${esc(p.niches.map(nicheLabel).join(", "))}</b>` : "your source channels"}${p.keywords ? ` plus “${esc(p.keywords)}”` : ""} in <b>${esc((LANGS.find((l) => l[0] === p.language) || ["", "any language"])[1])}</b>${p.sources.length ? `, and always checks <b>${p.sources.length} source channel${p.sources.length > 1 ? "s" : ""}</b>` : ""}.`],
+        ["shield", "Sources", p.source_mode === "safe" ? "<b>Safe mode:</b> only your source channels and Creative Commons videos. Credit goes in every description." : "<b>Any video.</b> Make sure you have the rights."],
+        ["film", "Make", `It picks the best new video and makes <b>${p.clips_per_video} short${p.clips_per_video > 1 ? "s" : ""}</b> (${len ? len[2] : `${p.min_seconds}–${p.max_seconds} seconds`}) in the <b>${esc(STYLES.find((s) => s[0] === p.caption_style)?.[1] || p.caption_style)}</b> style.`],
+        ["checkCircle", "You", "They wait in <b>Review</b> until you approve them. Nothing is posted without you."],
+        ["upload", "Publish", `Approved shorts go to <b>${esc(where)}</b>${p.youtube ? (p.spacing_hours ? `, one every <b>${p.spacing_hours} hours</b>` : ", <b>right away</b>") : ""}.`],
+      ];
+      b.innerHTML = `<p class="wz-q">Here's what will happen</p><p class="wz-help">Check that it reads right, then save.</p>
+        <div class="summary">${lines.map(([ic, t, txt]) => `<div class="sline"><div class="ic">${icon(ic)}</div><div><b>${t}</b><p>${txt}</p></div></div>`).join("")}</div>
+        ${p.youtube ? `<div class="note you" style="margin-top:14px"><div class="ic">${icon("info")}</div><div><b>Next: connect YouTube</b><p>After saving, press <b>Connect YouTube</b> on the channel so approved shorts can upload.</p></div></div>` : ""}`;
+    }
+    $("#wzStep", m).innerHTML = stepper(WZ_STEPS, step);
+    $("#wzBack", m).style.visibility = step ? "visible" : "hidden";
+    $("#wzCount", m).textContent = `Step ${step + 1} of ${WZ_STEPS.length}`;
+    $("#wzNext", m).innerHTML = step === WZ_STEPS.length - 1 ? `${icon("check")} ${existing ? "Save Changes" : "Save Channel"}` : `Next: ${WZ_STEPS[step + 1]} ${icon("chevR")}`;
+    $("#wzBody", m).scrollTop = 0;
+  };
+  $("#wzBack", m).onclick = () => { if (step > 0) { step--; body(); } };
+  $("#wzNext", m).onclick = async () => {
+    const v = valid();
+    if (v !== true) { $("#wzErr", m).textContent = v; (step === 0 ? $("#wzName", m) : step === 2 ? $("#wzSrc", m) : null)?.focus(); return; }
+    if (step < WZ_STEPS.length - 1) { step++; body(); return; }
+    const payload = {...p, id: existing?.id, name: p.name.trim(), sources: p.sources};
+    for (const k of ["youtube_status", "job", "pending", "published", "failed", "used_count", "used", "next_run", "last_error", "last_run", "last_publish_at"]) delete payload[k];
+    $("#wzNext", m).disabled = true;
+    try {
+      await api.post("/api/auto/profiles", payload);
+      closeModal(true); toast(existing ? "Changes saved" : `“${payload.name}” is on autopilot`);
+      if ($("#aList")) route();
+    } catch (e) { $("#wzNext", m).disabled = false; fail(e); }
+  };
+  body();
+}
+
+// ═════════════════════════ REVIEW ═════════════════════════
+const LIC = {cc: ["ok", "shield", "Creative Commons"], source: ["ok", "shield", "Your source channel"], unknown: ["err", "alert", "No reuse licence — check you have permission"]};
+const RV_TABS = [["pending", "Waiting"], ["approved,uploading,failed", "Publishing"], ["uploaded", "Published"], ["rejected", "Rejected"]];
+pages.review = async (el) => {
+  let tab = params().get("tab") || "pending";
+  if (!RV_TABS.some(([k]) => k === tab)) tab = "pending";
+  el.innerHTML = `<div class="ph"><div><h1>Review</h1><p>Watch each short, fix the title or description if you want, then approve. Approved shorts publish automatically after 10 seconds.</p></div></div>
+    <div class="row between" style="margin-bottom:18px"><div class="seg" id="rvTabs" role="tablist" aria-label="Filter shorts"></div>
+      <div class="keys" aria-hidden="true"><span><kbd>J</kbd> <kbd>K</kbd> Next and previous</span><span><kbd>A</kbd> Approve</span><span><kbd>R</kbd> Reject</span></div></div>
+    <div class="stack" id="rvList" style="gap:16px"></div>`;
+  let cur = 0, sig = "";
+  const tabs = () => {
+    const c = state.overview?.review || {};
+    const count = (k) => k.split(",").reduce((a, s) => a + (c[s] || 0), 0);
+    $("#rvTabs").innerHTML = RV_TABS.map(([k, l]) => `<button type="button" role="tab" aria-selected="${tab === k}" data-t="${k}" class="${tab === k ? "on" : ""}">${l}${count(k) ? `<span class="badge ${k === "pending" ? "" : "quiet"}">${count(k)}</span>` : ""}</button>`).join("");
+    $$("#rvTabs button").forEach((b) => b.onclick = () => { tab = b.dataset.t; setParam("tab", tab); cur = 0; load(true); });
+  };
+  const cards = () => $$("#rvList .rv");
+  const focusCard = (i, scroll = true) => {
+    const cs = cards(); if (!cs.length) return;
+    cur = Math.max(0, Math.min(cs.length - 1, i));
+    cs.forEach((c, k) => c.classList.toggle("cur", k === cur));
+    if (scroll) cs[cur].scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start"});
+  };
+  const act = async (id, action, btn) => {
+    const t = $(`[data-title="${id}"]`), d = $(`[data-desc="${id}"]`), extra = {};
+    if (t && !t.disabled) extra.title = t.value;
+    if (d && !d.disabled) extra.description = d.value;
+    if (btn) btn.disabled = true;
+    try { await reviewAction(id, action, extra, () => load(true)); if (action !== "save") load(true); else if (btn) btn.disabled = false; }
+    catch (e) { fail(e); if (btn) btn.disabled = false; }
+  };
+  const load = async (force) => {
+    await refreshGlobal(); if (!$("#rvTabs")) return; tabs();
+    let items; try { items = await api.get("/api/review?status=" + encodeURIComponent(tab)); } catch { return; }
+    const s = JSON.stringify(items.map((i) => [i.id, i.status, i.upload_pct, i.error]));
+    if (!force && s === sig) return;
+    if (!force && $("#rvList")?.contains(document.activeElement) && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;  // never wipe what you're typing
+    sig = s;
+    if (!items.length) {
+      $("#rvList").innerHTML = tab === "pending"
+        ? emptyState("checkCircle", "All caught up", "No shorts waiting. Run a channel in <a href=\"#auto\">Autopilot</a> or clip a video, and new shorts show up here.")
+        : emptyState("film", "Nothing here yet", "Shorts appear here as they move through publishing.");
+      return;
+    }
+    $("#rvList").innerHTML = items.map(reviewCard).join("");
+    $$("[data-title]").forEach((inp) => inp.oninput = () => { $(`[data-cnt="${inp.dataset.title}"]`).textContent = inp.value.length + "/100"; });
+    $$("#rvList [data-act]").forEach((b) => b.onclick = () => act(b.dataset.id, b.dataset.act, b));
+    cards().forEach((c, k) => c.addEventListener("focusin", () => focusCard(k, false)));
+    focusCard(Math.min(cur, items.length - 1), false);
+    if (items.some((i) => i.status === "approved" || i.status === "uploading")) setTimeout(() => { if ($("#rvList")) load(false); }, 2500);
+  };
+  const onKey = (e) => {
+    if (!$("#rvList")) { document.removeEventListener("keydown", onKey); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey || $("#modal") || $(".modal-bg[data-confirm]") || ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    const k = e.key.toLowerCase(), c = cards()[cur];
+    if (k === "j") { focusCard(cur + 1); e.preventDefault(); }
+    else if (k === "k") { focusCard(cur - 1); e.preventDefault(); }
+    else if ((k === "a" || k === "r") && c && tab === "pending") { act(c.dataset.id, k === "a" ? "approve" : "reject"); e.preventDefault(); }
+  };
+  document.addEventListener("keydown", onKey);
+  await load(true); repeat(4000, () => load(false));
+};
+
+function reviewCard(i) {
+  const [lc, lic, lt] = LIC[i.licence] || LIC.unknown;
+  const yt = i.youtube;
+  const editable = i.status === "pending" || i.status === "failed";
+  let actions;
+  if (i.status === "pending") actions = `<button type="button" class="btn primary" data-act="approve" data-id="${i.id}">${icon("check")} Approve &amp; Publish</button>
+      <button type="button" class="btn" data-act="save" data-id="${i.id}">Save Edits</button><button type="button" class="btn quiet danger" data-act="reject" data-id="${i.id}">${icon("x")} Reject</button>`;
+  else if (i.status === "approved") actions = `<span class="tag you"><span class="spin" style="width:12px;height:12px"></span> Uploading in a few seconds</span><button type="button" class="btn sm quiet" data-act="restore" data-id="${i.id}">Undo</button>`;
+  else if (i.status === "uploading") actions = `<div style="flex:1;max-width:320px"><div class="row small" style="gap:8px;margin-bottom:6px"><span class="dot live"></span>Uploading <span class="num">${Math.round((i.upload_pct || 0) * 100)}%</span></div><div class="bar"><i style="width:${Math.round((i.upload_pct || 0) * 100)}%"></i></div></div>`;
+  else if (i.status === "failed") actions = `<button type="button" class="btn primary" data-act="retry" data-id="${i.id}">${icon("refresh")} Try Again</button><button type="button" class="btn quiet danger" data-act="reject" data-id="${i.id}">Reject</button>`;
+  else if (i.status === "uploaded") actions = `${yt ? `<a class="btn primary" href="${esc(yt.url)}" target="_blank" rel="noopener">${icon("youtube")} View on YouTube</a>
+      <span class="tag ${yt.privacy === "public" ? "ok" : ""}">${esc(yt.privacy)}${yt.publish_at ? `, goes live ${fmtDate(yt.publish_at)}` : ""}</span>` : ""}
+      ${i.tiktok ? `<a class="btn" href="/media/${encodeURI(i.tiktok.file)}" download>${icon("phone")} TikTok File</a>` : ""}`;
+  else actions = `<button type="button" class="btn" data-act="restore" data-id="${i.id}">${icon("refresh")} Move Back to Waiting</button>`;
+  return `<article class="panel rv" data-id="${i.id}" aria-label="${esc(i.title)}">
+    <video src="/media/${encodeURI(i.file)}" ${i.thumb ? `poster="/media/${encodeURI(i.thumb)}"` : ""} controls preload="none" playsinline width="240" height="427"></video>
+    <div class="f">
+      <div class="row small muted"><span class="tag">${icon("bot")} ${esc(i.profile_name)}</span><span class="tag ${lc}">${icon(lic)} ${lt}</span>
+        ${i.score ? `<span class="score ${scoreCls(i.score)}" title="AI score">${i.score}</span>` : ""}<span class="num">${Math.round(i.duration || 0)}&nbsp;s</span><span>made ${rel(i.created)}</span></div>
+      <div class="small muted break">From <a href="${esc(i.source_url)}" target="_blank" rel="noopener">${esc(i.source_channel || "the source video")}</a>: ${esc(i.source_title || "")}</div>
+      ${i.status === "failed" ? `<div class="note err"><div class="ic">${icon("alert")}</div><div><b>The upload failed</b><p>${esc(i.error || "")}</p></div></div>` : ""}
+      <div><div class="lbl"><label for="t-${i.id}">Title</label><span data-cnt="${i.id}" class="num">${(i.title || "").length}/100</span></div>
+        <input class="input" id="t-${i.id}" type="text" maxlength="100" autocomplete="off" data-title="${i.id}" value="${esc(i.title)}" ${editable ? "" : "disabled"}></div>
+      <div><div class="lbl"><label for="d-${i.id}">Description</label></div><textarea class="input" id="d-${i.id}" rows="5" data-desc="${i.id}" ${editable ? "" : "disabled"}>${esc(i.description)}</textarea></div>
+      <div class="row">${actions}<a class="btn quiet icon" href="/media/${encodeURI(i.file)}" download aria-label="Download this short" title="Download">${icon("download")}</a></div>
+    </div></article>`;
+}
+
+// ═════════════════════════ LIBRARY ═════════════════════════
+pages.library = async (el) => {
+  el.innerHTML = `<div class="ph"><div><h1>Library</h1><p>Every video you've clipped, and the space it takes. Open one to see its shorts.</p></div></div><div id="libStore"></div><div id="libOut" class="sec"></div>`;
+  const load = async () => {
+    const [items, st] = await Promise.all([api.get("/api/library"), api.get("/api/storage")]);
+    if (!$("#libStore")) return;
+    const byId = Object.fromEntries(st.projects.map((p) => [p.id, p]));
+    const pct = (b) => st.total ? Math.max(b ? 0.5 : 0, (b / st.total) * 100) : 0;
+    $("#libStore").innerHTML = `<section class="panel"><div class="store"><div>
+        <div class="row between" style="margin-bottom:10px"><b>Storage</b><span class="num">${fmtBytes(st.total)} used</span></div>
+        <div class="stbar" role="img" aria-label="${fmtBytes(st.sources)} of downloads and ${fmtBytes(st.clips)} of shorts"><i class="src" style="width:${pct(st.sources)}%"></i><i class="clp" style="width:${pct(st.clips)}%"></i></div>
+        <div class="legend"><span><i style="background:#9ea2ad"></i>Downloaded videos: ${fmtBytes(st.sources)}</span><span><i style="background:var(--yellow)"></i>Your shorts: ${fmtBytes(st.clips)}</span></div></div>
+      <button type="button" class="btn" id="libClean" ${st.sources ? "" : "disabled"}>${icon("trash")} Delete All Downloads</button></div>
+      <p class="small faint" style="margin:10px 0 0">Downloads are only needed to re-edit a video, and Clippy downloads them again if you do. Your shorts are kept.</p></section>`;
+    $("#libClean").onclick = async () => {
+      if (!await confirmDialog({title: `Delete all downloads (${fmtBytes(st.sources)})?`, body: "Your shorts, transcripts and AI picks are kept. Re-editing a video downloads it again.", confirm: "Delete Downloads", danger: true})) return;
+      try { const r = await api.post("/api/storage/cleanup", {days: 0}); toast(`Freed ${fmtBytes(r.freed)}`); load(); } catch (e) { fail(e); }
+    };
+    const withClips = new Set(items.map((it) => it.id));
+    const others = st.projects.filter((p) => !withClips.has(p.id));
+    if (!items.length && !others.length) { $("#libOut").innerHTML = emptyState("grid", "No clips yet", "Videos you clip show up here.", `<a class="btn primary" href="#make">${icon("scissors")} Make Clips</a>`); return; }
+    const card = (it) => {
+      const sz = byId[it.id];
+      return `<article class="panel libcard"><button type="button" class="libopen" data-open="${esc(it.id)}">
+        <span class="thumbs">${it.clips.slice(0, 2).map((c) => `<img src="/media/${encodeURI(c.thumb)}" alt="" width="44" height="78" loading="lazy">`).join("")}</span>
+        <div><b>${esc(it.title)}</b><small>${it.clips.length} shorts${it.uploader ? `, ${esc(it.uploader)}` : ""}<br>${fmtDate(it.created)}${sz ? `, ${fmtBytes(sz.total)}` : ""}</small></div></button>
+        <div class="row">${sz?.has_source ? `<button type="button" class="btn sm" data-src="${esc(it.id)}">Delete Download (${fmtBytes(sz.source_bytes)})</button>` : ""}
+          <button type="button" class="btn sm quiet danger" data-delp="${esc(it.id)}" data-name="${esc(it.title)}">${icon("trash")} Delete</button></div></article>`;
+    };
+    $("#libOut").innerHTML = `<div class="libgrid">${items.map(card).join("")}</div>
+      ${others.length ? `<div class="sec"><div class="sec-head"><h2>Other downloads</h2><span>Videos without finished shorts, for example cancelled jobs</span></div>
+        <section class="panel" style="padding:6px 18px"><div class="rows">${others.map((p) => `<div class="rowi"><div class="t"><b>${esc(p.title)}</b><small class="num">${fmtBytes(p.total)}, last used ${rel(p.modified)}</small></div>
+          <button type="button" class="btn sm quiet danger" data-delp="${esc(p.id)}" data-name="${esc(p.title)}">${icon("trash")} Delete</button></div>`).join("")}</div></section></div>` : ""}`;
+    $$("[data-open]").forEach((b) => b.onclick = () => {
+      const it = items.find((x) => x.id === b.dataset.open);
+      const m = openModal(`<div class="mh"><div class="row between"><h2 class="break">${esc(it.title)}</h2><button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div>
+        <p class="muted small" style="margin:4px 0 12px">${it.clips.length} shorts. <a href="${esc(it.url)}" target="_blank" rel="noopener">Open the source video</a></p></div>
+        <div class="mb"><div class="clips">${it.clips.map(clipCard).join("")}</div></div>`, {label: it.title});
+      $("[data-close]", m).onclick = () => closeModal(); bindCopy(m);
+    });
+    $$("[data-src]").forEach((b) => b.onclick = async () => {
+      try { const r = await api.post(`/api/storage/${encodeURIComponent(b.dataset.src)}/source/delete`); toast(`Freed ${fmtBytes(r.freed)} — your shorts are kept`); load(); } catch (e) { fail(e); }
+    });
+    $$("[data-delp]").forEach((b) => b.onclick = async () => {
+      if (!await confirmDialog({title: `Delete “${b.dataset.name}”?`, body: "This removes the download, transcript and every short made from it. It can't be undone.", confirm: "Delete Everything", danger: true})) return;
+      try { const r = await api.del(`/api/storage/${encodeURIComponent(b.dataset.delp)}`); toast(`Deleted, freed ${fmtBytes(r.freed)}`); load(); refreshGlobal(); } catch (e) { fail(e); }
+    });
+    hydrateIcons(el);
+  };
+  await load();
+};
+
+// ═════════════════════════ SETTINGS ═════════════════════════
+pages.settings = async (el) => {
+  const [s, auto] = await Promise.all([api.get("/api/settings"), api.get("/api/autostart").catch(() => ({supported: false}))]);
+  const orig = {...s}, cur = {...s};
+  let keyTyped = "";
+  const sel = (k, val, opts) => `<select class="input" id="s-${k}" data-k="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(val) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  el.innerHTML = `<div class="ph"><div><h1>Settings</h1><p>These apply to everything new you make. A single video's options still win.</p></div></div>
+    <section class="panel" style="padding-top:4px;padding-bottom:16px">
+      <div class="set"><div><b>Start at login</b><p>Keeps Clippy running in the background so scheduled Autopilot runs happen even when no terminal is open.</p></div>
+        <div>${auto.supported ? `<label class="switch"><span class="ic">${icon("power")}</span><span class="txt"><b>Start Clippy when you log in</b><small id="autoNote">${auto.enabled ? "On: Clippy starts automatically at login." : "Off: start it yourself with ./clippy.sh web."}</small></span><input type="checkbox" id="autoSw" ${auto.enabled ? "checked" : ""}></label>`
+          : `<p class="muted">Not available on this system. It needs systemd.</p>`}</div></div>
+      <div class="set"><div><b>AI that picks the clips</b><p>Any OpenAI-compatible server. The default is your own llama.cpp server, which is free.</p></div>
+        <div class="stack"><label class="field"><span>Server address</span><input class="input" data-k="llm_url" autocomplete="off" spellcheck="false" value="${esc(s.llm_url)}" placeholder="http://127.0.0.1:8080/v1…"></label>
+          <label class="field"><span>Model (leave empty to use whatever is loaded)</span><input class="input" data-k="llm_model" autocomplete="off" spellcheck="false" value="${esc(s.llm_model)}" placeholder="qwen3:8b…"></label>
+          <label class="field"><span>API key (only for cloud services like Groq or Gemini)</span><input class="input" type="password" id="apiKey" autocomplete="off" placeholder="${s.has_llm_api_key ? "Saved. Type a new key to replace it…" : "gsk_…"}"></label>
+          <label class="switch"><span class="ic">${icon("sparkles")}</span><span class="txt"><b>Let the AI think first</b><small>Slower, sometimes smarter picks</small></span><input type="checkbox" data-k="llm_thinking" ${s.llm_thinking ? "checked" : ""}></label></div></div>
+      <div class="set"><div><b>Graphics card</b><p>Your GPU can't hold the AI and Whisper at once, so Clippy pauses the AI service for about a minute while it transcribes.</p></div>
+        <div class="stack"><label class="switch"><span class="ic">${icon("zap")}</span><span class="txt"><b>Pause the AI service while transcribing</b><small>About 10× faster transcription. Off means transcribing on the CPU.</small></span><input type="checkbox" data-k="free_gpu_for_whisper" ${s.free_gpu_for_whisper ? "checked" : ""}></label>
+          <label class="field"><span>AI service name (systemd user service)</span><input class="input" data-k="llama_service" autocomplete="off" spellcheck="false" value="${esc(s.llama_service)}" placeholder="llama-coder…"></label>
+          <label class="field"><span>Speech-to-text model</span>${sel("whisper_model", s.whisper_model, [["large-v3-turbo", "Large v3 Turbo (best)"], ["medium", "Medium (faster)"], ["small", "Small (fastest)"]])}</label></div></div>
+      <div class="set"><div><b>New clips</b><p>The starting point on Make Clips and for new Autopilot channels.</p></div>
+        <div class="stack"><div class="grid g3">
+            <label class="field"><span>Clips per video</span><input class="input num" type="number" inputmode="numeric" min="1" max="12" data-k="clips" value="${s.clips}"></label>
+            <label class="field"><span>Shortest (seconds)</span><input class="input num" type="number" inputmode="numeric" min="5" max="170" data-k="min_seconds" value="${s.min_seconds}"></label>
+            <label class="field"><span>Longest (seconds)</span><input class="input num" type="number" inputmode="numeric" min="10" max="180" data-k="max_seconds" value="${s.max_seconds}"></label></div>
+          <div class="grid g2"><label class="field"><span>Caption style</span>${sel("caption_style", s.caption_style, STYLES.map(([k, n]) => [k, n]))}</label>
+            <label class="field"><span>Download quality</span>${sel("max_height", s.max_height, [[1080, "1080p (smaller files)"], [1440, "1440p (recommended)"], [2160, "4K (sharpest, big files)"]])}</label></div>
+          <label class="switch"><span class="ic">${icon("music")}</span><span class="txt"><b>Voice polish</b><small>Trims low rumble and evens out loudness so voices sound clear on phones</small></span><input type="checkbox" data-k="voice_polish" ${s.voice_polish ? "checked" : ""}></label></div></div>
+      <div class="set"><div><b>Storage</b><p>Downloaded videos take the most space and are only needed to re-edit.</p></div>
+        <div><label class="field"><span>Delete downloaded videos automatically</span>${sel("auto_cleanup_days", s.auto_cleanup_days, [[0, "Never"], [3, "After 3 days without use"], [7, "After 7 days without use"], [14, "After 14 days without use"], [30, "After 30 days without use"]])}</label>
+          <div class="hint">Your shorts are never deleted automatically.</div></div></div>
+      <div class="row" style="justify-content:flex-end;padding-top:16px;border-top:1px solid var(--line)"><span class="small faint" id="setState" aria-live="polite"></span><button type="button" class="btn primary" id="setSave" disabled>Save Changes</button></div>
+    </section>`;
+  const dirty = () => Boolean(keyTyped) || Object.keys(cur).some((k) => String(cur[k]) !== String(orig[k]));
+  const mark = () => { $("#setSave").disabled = !dirty(); $("#setState").textContent = dirty() ? "Unsaved changes" : ""; };
+  leaveGuard = dirty;
+  $$("[data-k]", el).forEach((inp) => {
+    const k = inp.dataset.k;
+    const read = () => inp.type === "checkbox" ? inp.checked : inp.type === "number" ? +inp.value : (inp.tagName === "SELECT" && typeof orig[k] === "number") ? +inp.value : inp.value;
+    inp.addEventListener(inp.type === "checkbox" || inp.tagName === "SELECT" ? "change" : "input", () => { cur[k] = read(); mark(); });
+  });
+  $("#apiKey").oninput = (e) => { keyTyped = e.target.value; mark(); };
+  $("#setSave").onclick = async () => {
+    const changes = {};
+    for (const k of Object.keys(cur)) if (k !== "has_llm_api_key" && String(cur[k]) !== String(orig[k])) changes[k] = cur[k];
+    if (keyTyped) changes.llm_api_key = keyTyped;
+    $("#setSave").disabled = true;
+    try { const saved = await api.post("/api/settings", changes); Object.assign(orig, saved); Object.assign(cur, saved); keyTyped = ""; $("#apiKey").value = ""; mark(); toast("Settings saved"); }
+    catch (e) { fail(e); mark(); }
+  };
+  $("#autoSw")?.addEventListener("change", async (e) => {
+    const on = e.target.checked;
+    try { const r = await api.post("/api/autostart", {enabled: on}); $("#autoNote").textContent = r.enabled ? "On: Clippy starts automatically next time you log in." : "Off: start it yourself with ./clippy.sh web."; toast(r.enabled ? "Clippy will start at login" : "Start at login turned off"); }
+    catch (err) { e.target.checked = !on; fail(err); }
+  });
+};
+
+// ───────────────────────── boot ─────────────────────────
+hydrateIcons();
+refreshGlobal();
+setInterval(refreshGlobal, 5000);
+route();
