@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
 # Clippy setup: run once on a new PC (safe to run again any time, e.g. to update yt-dlp):
-#     bash setup.sh            asks before anything that needs sudo
-#     bash setup.sh --yes      don't ask    |    --no-tests   skip the self-test at the end
+#     bash setup.sh                  asks before anything that needs sudo, and which AI to set up
+#     bash setup.sh --yes            don't ask (installs ffmpeg; sets up an AI only with --ai)
+#     bash setup.sh --ai ollama      set up Ollama (also: --ai llamacpp, --ai skip)    --no-tests  skip the self-test
 set -uo pipefail
 DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 cd "$DIR" || exit 1
 
-YES=0; TESTS=1
-for a in "$@"; do case "$a" in
+YES=0; TESTS=1; AI=""
+while [ $# -gt 0 ]; do case "$1" in
   -y|--yes) YES=1 ;;
   --no-tests) TESTS=0 ;;
-  -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
-  *) echo "Unknown option: $a (try --help)"; exit 2 ;;
-esac; done
+  --ai) AI="${2:-}"; shift ;;
+  --ai=*) AI="${1#--ai=}" ;;
+  -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
+  *) echo "Unknown option: $1 (try --help)"; exit 2 ;;
+esac; shift; done
+case "$AI" in ""|ollama|llamacpp|skip) ;; *) echo "--ai takes ollama, llamacpp or skip"; exit 2 ;; esac
 
 WARN=0
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; WARN=$((WARN + 1)); }
+note() { printf '    %s\n' "$*"; }
 die()  { printf '  \033[31m✗\033[0m %s\n' "$*"; exit 1; }
 ask()  {  # yes → 0
   [ "$YES" = 1 ] && return 0
@@ -25,19 +30,40 @@ ask()  {  # yes → 0
   local r; read -r -p "  $1 [Y/n] " r; [[ -z "$r" || "$r" =~ ^[YyJj] ]]
 }
 pm_install() {
-  if   command -v pacman  >/dev/null; then sudo pacman -S --needed --noconfirm "$@"
-  elif command -v apt-get >/dev/null; then sudo apt-get update -q && sudo apt-get install -y "$@"
+  if   command -v apt-get >/dev/null; then sudo apt-get update -q && sudo apt-get install -y "$@"
+  elif command -v pacman  >/dev/null; then sudo pacman -S --needed --noconfirm "$@"
   elif command -v dnf     >/dev/null; then sudo dnf install -y "$@"
   elif command -v zypper  >/dev/null; then sudo zypper install -y "$@"
   else return 1; fi
 }
+pkg_name() {  # generic name → this distro's package
+  case "$1" in
+    emoji) if command -v apt-get >/dev/null; then echo fonts-noto-color-emoji
+           elif command -v pacman >/dev/null; then echo noto-fonts-emoji
+           elif command -v dnf >/dev/null; then echo google-noto-color-emoji-fonts
+           else echo google-noto-coloremoji-fonts; fi ;;
+    *) echo "$1" ;;
+  esac
+}
 
 [ "$(id -u)" = 0 ] && die "Run this as your normal user, not root (it asks for sudo itself when needed)."
-[ "$(uname -s)" = Linux ] || die "Clippy runs on Linux. On Windows, use WSL2 (Ubuntu) and run setup.sh inside it."
-chmod +x clippy.sh setup.sh 2>/dev/null   # unzip tools don't always keep the executable bit
+[ "$(uname -s)" = Linux ] || die "Clippy runs on Linux. On Windows: open PowerShell, run  wsl --install , restart, then run this inside Ubuntu."
+chmod +x clippy.sh setup.sh install.sh tools/ai-server/llama-coder 2>/dev/null   # unzip tools can drop the executable bit
+
+IS_WSL=0
+{ [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; } && IS_WSL=1
+SMI=$(command -v nvidia-smi || { [ -x /usr/lib/wsl/lib/nvidia-smi ] && echo /usr/lib/wsl/lib/nvidia-smi; } || true)
+HAS_NVIDIA=0
+[ -n "$SMI" ] && "$SMI" -L >/dev/null 2>&1 && HAS_NVIDIA=1
+
+if [ "$IS_WSL" = 1 ] && [[ "$DIR" == /mnt/* ]]; then
+  warn "Clippy is on a Windows drive ($DIR). In WSL that's about 10× slower for video work."
+  note "Better: move it into Linux first:  mv \"$DIR\" ~/clippy && cd ~/clippy && bash setup.sh"
+  ask "Continue here anyway?" || exit 1
+fi
 
 # ── 1. Python ≥ 3.11 ─────────────────────────────────────────────────────────
-step "1/5  Python"
+step "1/6  Python"
 find_python() {
   local c p
   for c in python3.14 python3.13 python3.12 python3.11 python3; do
@@ -60,7 +86,8 @@ fi
 ok "$("$PY" -V) ($PY)"
 
 # ── 2. Python packages in .venv ──────────────────────────────────────────────
-step "2/5  Python packages (first time: ~3 GB download, takes a few minutes)"
+if [ "$HAS_NVIDIA" = 1 ]; then step "2/6  Python packages (first time: ~3 GB download, takes a few minutes)"
+else step "2/6  Python packages (first time: ~1.5 GB download, takes a few minutes)"; fi
 VPY="$DIR/.venv/bin/python"
 if [ -e .venv ] && [ "$("$VPY" -c 'import sys; print(sys.prefix)' 2>/dev/null)" != "$DIR/.venv" ]; then
   warn "The existing .venv was made on another PC or in another folder; making a fresh one."
@@ -81,25 +108,39 @@ if [ ! -e .venv ]; then
 fi
 PIP=("$VPY" -m pip --disable-pip-version-check)
 "${PIP[@]}" install --quiet --upgrade pip
-if "${PIP[@]}" install -r requirements.txt -r requirements-dev.txt; then
+REQ=requirements.txt
+if [ "$HAS_NVIDIA" = 0 ]; then   # the CUDA libraries are only for NVIDIA cards: skip ~1.5 GB
+  grep -v '^nvidia-' requirements.txt > .venv/requirements-cpu.txt && REQ=.venv/requirements-cpu.txt
+fi
+if "${PIP[@]}" install -r "$REQ" -r requirements-dev.txt; then
   ok "Installed the exact versions Clippy was tested with"
 else
   warn "Those exact versions aren't available for $("$VPY" -V); installing the newest compatible ones instead."
-  sed 's/[=<>~!;].*//' requirements.txt requirements-dev.txt | grep -v '^\s*$' > .venv/requirements-unpinned.txt
+  sed 's/[=<>~!;].*//' "$REQ" requirements-dev.txt | grep -v '^\s*$' > .venv/requirements-unpinned.txt
   "${PIP[@]}" install -r .venv/requirements-unpinned.txt || die "pip could not install the packages (see the error above)."
 fi
 
-# ── 3. ffmpeg, yt-dlp, deno ──────────────────────────────────────────────────
-step "3/5  ffmpeg + yt-dlp"
-if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
-  warn "ffmpeg is missing (Clippy needs it for every video)."
-  if ask "Install ffmpeg now with sudo?"; then pm_install ffmpeg || warn "Couldn't install ffmpeg automatically."; fi
+# ── 3. ffmpeg, emoji font, yt-dlp, deno ──────────────────────────────────────
+step "3/6  ffmpeg, emoji font, yt-dlp"
+has_emoji_font() {
+  fc-list 2>/dev/null | grep -qi "Noto Color Emoji" && return 0
+  for f in /usr/share/fonts/noto/NotoColorEmoji.ttf /usr/share/fonts/truetype/noto/NotoColorEmoji.ttf \
+           /usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf; do [ -e "$f" ] && return 0; done
+  return 1
+}
+NEED=()
+{ command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; } || NEED+=("$(pkg_name ffmpeg)")
+has_emoji_font || NEED+=("$(pkg_name emoji)")
+if [ ${#NEED[@]} -gt 0 ]; then
+  printf '  Missing: %s\n' "${NEED[*]}"
+  if ask "Install them now with sudo?"; then pm_install "${NEED[@]}" || warn "Couldn't install ${NEED[*]} automatically."; fi
 fi
 if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then
   ok "ffmpeg $(ffmpeg -version | head -1 | cut -d' ' -f3)"
 else
   warn "Install ffmpeg with your package manager, then run setup again."
 fi
+if has_emoji_font; then ok "Emoji font"; else warn "No color emoji font: captions will skip emojis ($(pkg_name emoji) adds them)."; fi
 
 # yt-dlp breaks whenever YouTube changes, so an old distro copy is no good: use the system one only if it's recent
 SYS_YTDLP=$(type -ap yt-dlp | grep -v "^$DIR/.venv/" | head -1)
@@ -124,31 +165,108 @@ else
   warn "Couldn't install deno; some YouTube downloads may fail."
 fi
 
-# ── 4. GPU + AI server (information only; Clippy works without them, just slower / no AI picks) ──
-step "4/5  GPU + AI server"
-if command -v nvidia-smi >/dev/null && nvidia-smi -L >/dev/null 2>&1; then
-  ok "GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1)"
+# ── 4. Graphics card ─────────────────────────────────────────────────────────
+step "4/6  Graphics card"
+if [ "$HAS_NVIDIA" = 1 ]; then
+  ok "GPU: $("$SMI" --query-gpu=name,memory.total --format=csv,noheader | head -1)"
   if "$VPY" -c 'import ctranslate2, sys; sys.exit(ctranslate2.get_cuda_device_count() < 1)' 2>/dev/null; then
     ok "Whisper can use the GPU"
   else
     warn "Whisper can't see the GPU (check the NVIDIA driver); it'll transcribe on the CPU."
   fi
+elif [ "$IS_WSL" = 1 ]; then
+  warn "No NVIDIA GPU visible in WSL. Clippy works on the CPU, just slower."
+  note "Have an NVIDIA card? Install the latest NVIDIA driver on Windows (not inside Ubuntu),"
+  note "then run  wsl --shutdown  in PowerShell, open Ubuntu again and run: bash setup.sh"
 else
   warn "No NVIDIA GPU/driver found: Clippy still works, but transcribing and encoding run on the CPU (slower)."
 fi
-LLM=$("$VPY" -c 'from clippy import config; print(config.load().llm_url)' 2>/dev/null)
-if "$VPY" -c 'import httpx, sys; httpx.get(sys.argv[1].rstrip("/") + "/models", timeout=3).raise_for_status()' "$LLM" 2>/dev/null; then
-  ok "AI server answers at $LLM"
-else
-  warn "No AI server at $LLM yet, so Clippy can't pick clips. See MOVING.md, section \"The AI server\"."
-fi
-SVC=$("$VPY" -c 'from clippy import config; print(config.load().llama_service)' 2>/dev/null)
-if [ -n "$SVC" ] && command -v systemctl >/dev/null && ! systemctl --user cat "$SVC" >/dev/null 2>&1; then
-  printf '  · No systemd service called "%s" here; Clippy only pauses it to free the GPU, so this is fine.\n' "$SVC"
-fi
 
-# ── 5. Claude Code memory + self-test ───────────────────────────────────────
-step "5/5  Finishing"
+# ── 5. The AI that picks the clips ───────────────────────────────────────────
+step "5/6  AI that picks the clips"
+ai_json() { "$VPY" -m clippy ai --json 2>/dev/null; }
+ai_using() { "$VPY" -c 'import json,sys; u=json.load(sys.stdin).get("using") or {}; print((u.get("model") or "the loaded model") + " on " + u.get("label","?"))'; }
+ai_wait() {  # a freshly started server can take a minute to load its model
+  local j
+  for _ in $(seq 1 60); do j=$(ai_json) && { echo "$j"; return 0; }; sleep 2; done
+  return 1
+}
+setup_ollama() {
+  local model
+  model=$("$VPY" -m clippy.aisetup ollama-model)
+  if ! command -v ollama >/dev/null; then
+    if ask "Install Ollama with its official installer from ollama.com? (It asks for your password.)"; then
+      command -v zstd >/dev/null || pm_install zstd || true   # the installer needs it to unpack
+      curl -fsSL https://ollama.com/install.sh | sh || { warn "The Ollama installer failed (see above)."; return 1; }
+    else
+      warn "Skipped installing Ollama."; return 1
+    fi
+  fi
+  if ! ollama list >/dev/null 2>&1; then   # not running as a service (WSL without systemd, for example)
+    (nohup ollama serve >"$HOME/.ollama-serve.log" 2>&1 &)
+    for _ in $(seq 1 20); do ollama list >/dev/null 2>&1 && break; sleep 1; done
+  fi
+  ollama list >/dev/null 2>&1 || { warn "Ollama isn't answering. Start it with:  ollama serve"; return 1; }
+  printf '  Downloading %s, sized for this PC (the big download)…\n' "$model"
+  ollama pull "$model" || { warn "Couldn't download $model."; return 1; }
+  ok "Ollama is ready with $model"
+}
+setup_llamacpp() {
+  "$VPY" -m clippy.aisetup llamacpp || { warn "llama.cpp setup didn't finish (see above)."; return 1; }
+  if ! systemctl --user is-active --quiet llama-coder 2>/dev/null; then   # no systemd: start it for now
+    (nohup "$HOME/.local/bin/llama-coder" >"$HOME/.llama-coder.log" 2>&1 &)
+  fi
+}
+
+if AI_NOW=$(ai_json); then
+  ok "Found $(echo "$AI_NOW" | ai_using). Clippy will use it."
+  [ -z "$AI" ] && AI=found
+fi
+if [ -z "$AI" ]; then
+  if [ "$YES" = 1 ] || [ ! -t 0 ]; then
+    AI=skip
+  else
+    REC=$("$VPY" -m clippy.aisetup recommend 2>/dev/null)
+    OLL=$(echo "$REC" | "$VPY" -c 'import json,sys; print(json.load(sys.stdin)["ollama"])' 2>/dev/null || echo "qwen3.5:9b")
+    GGUF=$(echo "$REC" | "$VPY" -c 'import json,sys; g=json.load(sys.stdin)["gguf"] or {}; print(g.get("file", "a model").removesuffix(".gguf") + ", " + str(g.get("gb", "?")) + " GB")' 2>/dev/null)
+    echo "  Clippy needs a local AI to pick the best moments, and none is running yet. Pick one:"
+    echo "    1) Ollama      easiest: installs Ollama (asks for your password) and downloads $OLL"
+    echo "    2) llama.cpp   no password, fastest with big models: downloads into ~/.local and ~/models ($GGUF)"
+    echo "    3) Skip        I'll start my own (LM Studio, Jan, KoboldCpp…) or use a cloud API key"
+    [ "$IS_WSL" = 1 ] && note "Already running Ollama or LM Studio on Windows? Choose 3 and see README → \"AI on Windows\"."
+    read -r -p "  Your choice [1]: " c
+    case "${c:-1}" in 1) AI=ollama ;; 2) AI=llamacpp ;; *) AI=skip ;; esac
+  fi
+fi
+case "$AI" in
+  ollama|llamacpp)
+    if [ "$AI" = ollama ]; then setup_ollama; else setup_llamacpp; fi && {
+      if AI_NOW=$(ai_wait); then
+        ok "Using $(echo "$AI_NOW" | ai_using)"
+        TEST=$("$VPY" -m clippy ai test 2>&1 | tail -1)
+        case "$TEST" in "Test answer"*) ok "${TEST%%  (*}" ;; *) warn "The AI answered oddly: $TEST" ;; esac
+      else
+        warn "The AI server isn't answering yet. Check with:  clippy ai"
+      fi
+    } ;;
+  skip)
+    warn "No AI set up yet, so Clippy can't pick clips. Start one (Ollama, LM Studio, llama.cpp…) and Clippy finds it,"
+    note "or run:  bash setup.sh --ai ollama   (or --ai llamacpp). Check anytime with:  clippy ai" ;;
+esac
+
+# ── 6. Finishing ─────────────────────────────────────────────────────────────
+step "6/6  Finishing"
+mkdir -p "$HOME/.local/bin"
+LINK="$HOME/.local/bin/clippy"
+if [ ! -e "$LINK" ] || [ "$(readlink -f "$LINK")" = "$DIR/clippy.sh" ]; then
+  ln -sf "$DIR/clippy.sh" "$LINK"
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ok "Command: clippy  (for example: clippy web)" ;;
+    *) ok "Command: clippy  (open a new terminal first, so it's on your PATH)" ;;
+  esac
+else
+  note "$LINK already exists, so use ./clippy.sh in this folder."
+fi
 if [ -d move-kit/claude-memory ]; then
   KEY=$(printf '%s' "$DIR" | sed 's/[^A-Za-z0-9]/-/g')      # how Claude Code names a project folder
   DST="$HOME/.claude/projects/$KEY/memory"
@@ -164,5 +282,10 @@ if [ "$TESTS" = 1 ]; then
   else warn "Some self-tests failed (output above). Clippy may still run; mention it if something breaks."; fi
 fi
 
-printf '\n\033[1mDone%s.\033[0m Start Clippy with:  ./clippy.sh web   (opens http://127.0.0.1:7860)\n' \
+printf '\n\033[1mDone%s.\033[0m Start Clippy with:  clippy web   (or ./clippy.sh web)\n' \
   "$([ "$WARN" -gt 0 ] && echo " with $WARN note(s) above")"
+if [ "$IS_WSL" = 1 ]; then
+  echo "It opens in your Windows browser at http://localhost:7860 (or open that address yourself)."
+else
+  echo "It opens in your browser at http://localhost:7860."
+fi

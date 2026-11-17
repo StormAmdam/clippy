@@ -9,9 +9,13 @@
 # On a smaller GPU (≤ 8 GB) use a lower margin, e.g. LLAMA_CODER_FREE_MB=1024, and let Clippy pause the
 # service while it transcribes (free_gpu_for_whisper = true, the default).
 #
-# Override without editing:  LLAMA_CODER_CTX=32768 LLAMA_CODER_THREADS=6 llama-coder
+# Settings come from ~/.config/llama-coder.env (Clippy's setup.sh writes it), or override them for one run:
+#   LLAMA_CODER_CTX=32768 LLAMA_CODER_THREADS=6 llama-coder
 # Extra flags are passed through: llama-coder --verbose
 set -euo pipefail
+ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/llama-coder.env"
+# shellcheck disable=SC1090
+[ -f "$ENV_FILE" ] && . "$ENV_FILE"
 
 # Any GGUF chat model works; this one is a Qwen3.6-35B-A3B fine-tune with fewer refusals (IQ4_XS, 18.7 GB):
 # https://huggingface.co/mradermacher/Qwen3.6-35B-A3B-uncensored-heretic-i1-GGUF
@@ -19,10 +23,11 @@ MODEL="${LLAMA_CODER_MODEL:-$HOME/models/Qwen3.6-35B-A3B-uncensored-heretic.i1-I
 CTX="${LLAMA_CODER_CTX:-65536}"
 PORT="${LLAMA_CODER_PORT:-8080}"
 LLAMA_DIR="${LLAMA_CPP_DIR:-$HOME/.local/opt/llama.cpp/current}"
+ALIAS="${LLAMA_CODER_ALIAS:-$(basename "$MODEL" .gguf)}"   # the model name Clippy shows
 
 exec "$LLAMA_DIR/llama-server" \
   --model "$MODEL" \
-  --alias qwen3.6-heretic \
+  --alias "$ALIAS" \
   --host 127.0.0.1 --port "$PORT" \
   --ctx-size "$CTX" \
   --parallel 1 \

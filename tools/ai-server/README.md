@@ -1,10 +1,16 @@
 # Local AI server (llama.cpp)
 
-Clippy picks clips with any OpenAI-compatible chat server (default `http://127.0.0.1:8080/v1`).
-This folder has the launcher and systemd user service used during development. Ollama or a free cloud
-tier work too: see `config.toml`.
+Clippy finds any running llama.cpp, Ollama, LM Studio, Jan, KoboldCpp or vLLM server by itself (see the main
+README, "Use your own AI"). This folder has a llama.cpp launcher and systemd user service.
 
-## Setup on Linux with an NVIDIA GPU (no compiling)
+**The easy way:** `bash setup.sh --ai llamacpp` does everything below by itself: it downloads the right prebuilt
+llama.cpp (CUDA, Vulkan or CPU), picks a model that fits your graphics memory, RAM and free disk space, writes
+`~/.config/llama-coder.env`, and starts the service. The steps below are for doing it by hand.
+
+The launcher reads `~/.config/llama-coder.env` (`LLAMA_CODER_MODEL`, `LLAMA_CODER_FREE_MB`, `LLAMA_CODER_THREADS`,
+`LLAMA_CODER_CTX`); change it and run `systemctl --user restart llama-coder`.
+
+## Setup by hand on Linux with an NVIDIA GPU (no compiling)
 
 1. Download a prebuilt llama.cpp from <https://github.com/ggml-org/llama.cpp/releases>: the
    `llama-<build>-bin-ubuntu-cuda-12.8-x64.tar.gz` **and** the matching `cudart-llama-…-cuda-12.8-x64.tar.gz`

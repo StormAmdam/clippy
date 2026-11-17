@@ -35,16 +35,33 @@ Paste a YouTube link (or drop in a video file) and Clippy:
 Music, gameplay and sports videos work too. Without speech, Clippy picks moments from the sound, the replay graph
 and the picture instead.
 
-## Quick start
+## Install
+
+**On Linux,** paste this into a terminal:
 
 ```
-git clone https://github.com/StormAmdam/clippy.git
-cd clippy
-bash setup.sh       # installs everything into .venv, checks your GPU and AI server, runs the tests
-./clippy.sh web     # opens the app at http://127.0.0.1:7860
+curl -fsSL https://raw.githubusercontent.com/StormAmdam/clippy/main/install.sh | bash
 ```
 
-Clippy needs an AI server to pick clips. Any OpenAI-compatible one works: see [AI server](#ai-server).
+**On Windows,** Clippy runs inside Ubuntu with WSL, which takes about ten minutes to set up:
+
+1. Right-click **Start**, open **Terminal (Admin)** or **PowerShell (Admin)**, and run `wsl --install`.
+   Restart your PC when it asks.
+2. Ubuntu opens by itself after the restart (or find it in the Start menu). Choose a username and password.
+3. If you have an NVIDIA graphics card, update its normal Windows driver. Don't install a driver inside Ubuntu:
+   WSL uses the Windows one.
+4. In the Ubuntu window, paste the install line from above and press Enter.
+
+The installer puts Clippy in `~/clippy` and walks you through the rest: Python packages, ffmpeg, an emoji font,
+and a local AI that fits your PC (it asks before using your password or downloading a model).
+When it's done, start Clippy with:
+
+```
+clippy web
+```
+
+It opens at <http://localhost:7860>; on Windows, in your normal Windows browser.
+Run the install line again any time to update.
 
 ## Caption styles
 
@@ -80,24 +97,61 @@ file for posting to TikTok from your phone.
 
 ## Requirements
 
-- **Linux** (Debian/Ubuntu, Arch, Fedora…). On Windows, use WSL2 with Ubuntu.
-- **Python 3.11+** and **ffmpeg**. `setup.sh` offers to install ffmpeg if it's missing.
-- **An NVIDIA GPU** is recommended, for Whisper and NVENC encoding. Everything also runs on the CPU, just slower.
-- Optional: an emoji font for caption emojis (`fonts-noto-color-emoji` on Debian/Ubuntu, `noto-fonts-emoji` on Arch).
+- **Linux** (Ubuntu, Debian, Arch, Fedora…) or **Windows 10/11 with WSL**. Python 3.11+ is all you need beforehand;
+  setup installs the rest.
+- **An NVIDIA graphics card** is recommended, for fast transcribing and encoding. Everything also runs on the
+  CPU, just slower.
+- **Disk space:** about 3 GB for Clippy, plus 3–23 GB for a local AI model, plus your videos.
 
-`setup.sh` is safe to run again any time, for example to update yt-dlp when YouTube changes something.
-It only uses `sudo` after asking.
+Already cloned the repo? `bash setup.sh` does the same as the install line. It's safe to run again any time, for
+example to update yt-dlp when YouTube changes something, or to add an AI later: `bash setup.sh --ai ollama`.
 
-## AI server
+## Use your own AI
 
-Clippy sends the transcript to an OpenAI-compatible chat server (default `http://127.0.0.1:8080/v1`).
+Clippy needs a local AI model to read the transcript and pick the moments. **It finds one by itself:** whatever
+is running on this PC (or, from WSL, on the Windows side) on these apps' usual ports.
 
-- **llama.cpp** (what the demo used): a prebuilt CUDA build and a Qwen3.6-35B-A3B model. Setup steps, a launcher
-  and a systemd service are in [`tools/ai-server/`](tools/ai-server/README.md). No compiling.
-- **Ollama:** set `llm_url = "http://127.0.0.1:11434/v1"` and a model, e.g. `llm_model = "qwen3:8b"`.
-- **Free cloud tiers** (Groq, Gemini): examples are in [`config.toml`](config.toml).
+| App | Usual address | Notes |
+|---|---|---|
+| [Ollama](https://ollama.com) | `127.0.0.1:11434` | Easiest. Clippy asks it for a 16k-token context, so long videos aren't cut off |
+| [LM Studio](https://lmstudio.ai) | `127.0.0.1:1234` | Start the server in the Developer tab; load the model with a context of 16384 or more |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) | `127.0.0.1:8080` | Fastest with big models. [`tools/ai-server/`](tools/ai-server/README.md) has a ready launcher |
+| [Jan](https://jan.ai), [KoboldCpp](https://github.com/LostRuins/koboldcpp), [vLLM](https://github.com/vllm-project/vllm) | `:1337`, `:5001`, `:8000` | Turn on the app's local API server |
+| Anything else OpenAI-compatible | your address | Enter it under **Settings → AI**, with an API key for cloud services |
 
-Change it in the app under **Settings**, or in `config.toml`.
+**Which model:** Clippy uses the model already loaded, otherwise your newest download, and skips embedding models.
+Pick another one under **Settings → AI**, which lists every server and model it found. In the terminal,
+`clippy ai` shows the same, and `clippy ai test` sends a real request and times it.
+
+**Short on context?** If a server's context window is small, Clippy reads the video in smaller pieces, and splits
+any piece the server refuses. Bigger windows (16k or more) are faster and pick better.
+
+**Which model fits your PC:** bigger models pick better clips. Setup picks one for you; these are its choices.
+
+| Your PC | Ollama | llama.cpp |
+|---|---|---|
+| 22 GB+ graphics memory | `qwen3.6:35b-a3b` | Qwen3.6-35B-A3B, 17.7 GB |
+| 7–21 GB graphics memory | `qwen3.5:9b` | Qwen3.6-35B-A3B with 24 GB+ RAM (it runs partly from RAM), otherwise Qwen3.5-9B |
+| Less than 7 GB, or no GPU | `qwen3.5:4b` | Qwen3.5-4B (Qwen3.5-9B with 12 GB+ RAM) |
+
+Models that "think" are told not to, which is faster; turn on *Let the AI think first* in Settings to allow it.
+
+<details>
+<summary><b>Using an AI that runs on Windows (from WSL)</b></summary>
+
+Clippy looks for the AI on the Windows side too, but Windows apps only listen to Windows itself by default.
+Make yours reachable in one of these ways, then run `clippy ai` to check:
+
+- **Ollama for Windows:** add the environment variable `OLLAMA_HOST` = `0.0.0.0` (Start → "Edit environment
+  variables for your account"), then quit Ollama from the tray and start it again.
+- **LM Studio:** Developer → Settings → turn on **Serve on Local Network**.
+- **Any app:** turn on WSL's mirrored networking. Create `%UserProfile%\.wslconfig` containing
+  `[wsl2]` and `networkingMode=mirrored` on two lines, then run `wsl --shutdown` in PowerShell. Windows apps are
+  then on `127.0.0.1` inside Ubuntu.
+
+Windows Firewall may ask once whether to allow the connection. Running the AI inside Ubuntu instead (the Ollama or
+llama.cpp option in setup) avoids all this and uses the same graphics card.
+</details>
 
 <details>
 <summary><b>Command line</b></summary>
@@ -111,7 +165,11 @@ Change it in the app under **Settings**, or in `config.toml`.
 ./clippy.sh "https://youtu.be/…" --no-talking                            # music / gameplay / sport: skip Whisper
 ./clippy.sh ~/Videos/my-video.mp4    # local files work too
 ./clippy.sh auto all                 # run every Autopilot channel now (results go to Review)
+./clippy.sh ai                       # which AI servers and models Clippy can see, and which it will use
+./clippy.sh ai test                  # send the AI a real request and time it
 ```
+
+After setup, `clippy` works as a shortcut for `./clippy.sh` from any folder.
 
 Clips land in `output/<video-id>/clips/`, with `result.json` holding titles, captions and hashtags.
 Re-running a video reuses its download and transcript.
@@ -125,9 +183,9 @@ caption style, colours and size, hook title, split screen, silence cutting, soun
 The **Settings** page in the app covers the common ones, plus storage cleanup and *Start at login*.
 Environment variables `CLIPPY_<NAME>` override both, e.g. `CLIPPY_OUTPUT_DIR=/data/clips`.
 
-**Sharing the GPU with the AI server:** Whisper needs about 2.6 GB of free VRAM. If your AI server leaves less,
-Clippy pauses its systemd service (`llama_service`, default `llama-coder`) while transcribing and starts it again
-right after. Set `free_gpu_for_whisper = false` to never touch it.
+**Sharing the GPU with the AI:** Whisper needs about 2.6 GB of free graphics memory. If the AI leaves less, Clippy
+pauses its systemd service (`llama_service`, default `llama-coder`) or asks Ollama to unload its model while
+transcribing; the AI comes back by itself right after. Set `free_gpu_for_whisper = false` to never touch it.
 </details>
 
 <details>
