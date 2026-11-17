@@ -32,6 +32,9 @@ jobs:
           $dir = "$env:LOCALAPPDATA\Programs\Clippy"
           if (-not (Test-Path "$dir\Clippy.exe")) { throw "The installer didn't put Clippy in $dir" }
           if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clippy.lnk")) { throw "No Start menu shortcut" }
+          $busy = $true
+          try { Invoke-RestMethod http://127.0.0.1:7860/api/status -TimeoutSec 2 | Out-Null } catch { $busy = $false }
+          if ($busy) { throw "Something from the build is still running on port 7860" }
           Start-Process "$dir\Clippy.exe"
           $ok = $false
           foreach ($i in 1..90) { try { Invoke-RestMethod http://127.0.0.1:7860/api/status | Out-Null; $ok = $true; break } catch { Start-Sleep 2 } }
