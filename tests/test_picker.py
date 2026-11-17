@@ -82,3 +82,39 @@ def test_tidy_post_keeps_hashtags_used_inside_a_sentence():
 def test_tidy_post_caps_the_hashtag_count():
     _, tags = picker.tidy_post("x #a #b #c #d", ["#e", "#f", "#g", "#h"])
     assert tags == ["#e", "#f", "#g", "#h", "#a", "#b"]
+
+
+def test_scout_splits_a_chunk_the_ai_says_is_too_long_and_keeps_going(monkeypatch):
+    import re
+
+    from clippy import llm as llm_mod
+    seen = {"too_long": 0, "ok": []}
+
+    class SmallContextAI:
+        base, model, context = "http://fake/v1", "tiny", 0
+
+        def __init__(self, cfg, log=print):
+            self.cfg = cfg
+
+        def wait_ready(self, *a, **k):
+            pass
+
+        def budget_chars(self, out_tokens=3000):
+            return self.cfg.llm_chunk_chars                      # server didn't say: start big
+
+        def json(self, system, user, schema, max_tokens=3000, temperature=0.4):
+            if schema is picker.SCOUT_SCHEMA:
+                if len(user) > 4000:
+                    seen["too_long"] += 1
+                    raise llm_mod.ContextTooSmall("context size exceeded")
+                ids = [int(i) for i in re.findall(r"^\[(\d+)\]", user, re.M)]
+                seen["ok"].append(len(user))
+                return {"clips": [{"start_id": ids[0], "end_id": ids[0] + 9, "score": 70, "why": "w", "hook": "h"}]}
+            raise RuntimeError("refine not needed here")          # picker falls back to the raw pick
+
+    monkeypatch.setattr(picker, "LLM", SmallContextAI)
+    words = make_words(" ".join(f"sentence number {i} is here." for i in range(300)))
+    clips = picker.pick_clips(Settings(clips=3, min_seconds=20, max_seconds=40), {"title": "T"},
+                              {"words": words, "language": "en"}, log=lambda m: None)
+    assert seen["too_long"] >= 1 and seen["ok"] and max(seen["ok"]) <= 4000
+    assert len(clips) == 3

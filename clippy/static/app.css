@@ -123,6 +123,8 @@ select.input { background-color: var(--bay2); color: var(--ink); }
 textarea.input { resize: vertical; min-height: 96px; line-height: 1.45; }
 .input.big { min-height: 54px; font-size: 17px; padding: 13px 16px; }
 .hint { color: var(--faint); font-size: 13px; margin-top: 6px; }
+.aibox { background: var(--suite); border: 1px solid var(--line); border-radius: var(--ctl); padding: 12px 14px; font-size: 14px; }
+.aibox .small { line-height: 1.45; }
 .err-text { color: var(--err); font-size: 13.5px; }
 
 .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;

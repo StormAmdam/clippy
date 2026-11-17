@@ -202,7 +202,7 @@ async function refreshGlobal() {
     $("#navReview").textContent = n; $("#navReview").classList.toggle("hidden", !n);
     const run = st.running;
     $("#railStatus").innerHTML = `
-      <div class="line"><span class="dot ${st.llm ? "ok" : "bad"}"></span>Local AI ${st.llm ? "online" : "offline"}</div>
+      <div class="line" title="${esc(st.llm ? `${st.model} on ${st.ai}` : (st.ai_error || ""))}"><span class="dot ${st.llm ? "ok" : "bad"}"></span>Local AI ${st.llm ? "online" : "offline"}</div>
       ${st.vram_free != null ? `<div class="line"><span class="dot ok"></span>GPU: ${(st.vram_free / 1024).toFixed(1)}&nbsp;GB free</div>` : ""}
       ${run ? `<div class="onair"><div class="what"><span class="dot live"></span>${run.kind === "auto" ? "Autopilot on air" : "Making clips"}</div>
         <div class="bar"><i style="width:${(run.pct * 100).toFixed(1)}%"></i></div><div class="msg">${esc(run.msg || "")}</div>
@@ -306,7 +306,7 @@ pages.home = async (el) => {
          <div class="bar" style="margin:12px 0 8px"><i style="width:${(run.pct * 100).toFixed(1)}%"></i></div>
          <div class="small muted">${esc(run.msg || "")}</div>
          <div class="row" style="margin-top:12px"><a class="btn sm" href="${run.kind === "auto" ? "#auto" : "#make"}">Open</a><button type="button" class="btn sm quiet" data-cancel="${run.id}">${icon("stop")} Cancel</button></div>`
-      : `<div class="what"><span class="dot ${st?.llm ? "ok" : "bad"}"></span>Nothing on air</div><p class="small muted" style="margin:8px 0 0">${st?.llm ? "Ready for the next video." : "The local AI is offline. Start llama-coder so Clippy can pick clips."}</p>`;
+      : `<div class="what"><span class="dot ${st?.llm ? "ok" : "bad"}"></span>Nothing on air</div><p class="small muted" style="margin:8px 0 0">${st?.llm ? "Ready for the next video." : "No AI server found. Start Ollama, LM Studio or llama.cpp, or check Settings."}</p>`;
     $$("[data-cancel]", $("#hAir")).forEach((b) => b.onclick = () => cancelJob(b.dataset.cancel));
     $("#hFacts").innerHTML = `
       <a class="fact ${o.review.pending ? "you" : ""}" href="#review"><div class="k">Waiting for you</div><div class="v">${o.review.pending}</div></a>
@@ -1004,13 +1004,14 @@ pages.settings = async (el) => {
       <div class="set"><div><b>Start at login</b><p>Keeps Clippy running in the background so scheduled Autopilot runs happen even when no terminal is open.</p></div>
         <div>${auto.supported ? `<label class="switch"><span class="ic">${icon("power")}</span><span class="txt"><b>Start Clippy when you log in</b><small id="autoNote">${auto.enabled ? "On: Clippy starts automatically at login." : "Off: start it yourself with ./clippy.sh web."}</small></span><input type="checkbox" id="autoSw" ${auto.enabled ? "checked" : ""}></label>`
           : `<p class="muted">Not available on this system. It needs systemd.</p>`}</div></div>
-      <div class="set"><div><b>AI that picks the clips</b><p>Any OpenAI-compatible server. The default is your own llama.cpp server, which is free.</p></div>
-        <div class="stack"><label class="field"><span>Server address</span><input class="input" data-k="llm_url" autocomplete="off" spellcheck="false" value="${esc(s.llm_url)}" placeholder="http://127.0.0.1:8080/v1…"></label>
-          <label class="field"><span>Model (leave empty to use whatever is loaded)</span><input class="input" data-k="llm_model" autocomplete="off" spellcheck="false" value="${esc(s.llm_model)}" placeholder="qwen3:8b…"></label>
+      <div class="set"><div><b>AI that picks the clips</b><p>Clippy finds llama.cpp, Ollama, LM Studio, Jan, KoboldCpp or vLLM by itself, on this computer or on Windows when you use WSL. Choose a server or model here only if you want a specific one.</p></div>
+        <div class="stack"><div class="aibox" id="aiBox" aria-live="polite"><span class="small muted">Looking for AI servers…</span></div>
+          <label class="field"><span>Server address (auto finds one by itself)</span><input class="input" data-k="llm_url" autocomplete="off" spellcheck="false" value="${esc(s.llm_url)}" placeholder="auto"></label>
+          <label class="field"><span>Model (empty: the one already loaded, or your newest download)</span><input class="input" data-k="llm_model" list="aiModels" autocomplete="off" spellcheck="false" value="${esc(s.llm_model)}" placeholder="qwen3.5:9b…"><datalist id="aiModels"></datalist></label>
           <label class="field"><span>API key (only for cloud services like Groq or Gemini)</span><input class="input" type="password" id="apiKey" autocomplete="off" placeholder="${s.has_llm_api_key ? "Saved. Type a new key to replace it…" : "gsk_…"}"></label>
           <label class="switch"><span class="ic">${icon("sparkles")}</span><span class="txt"><b>Let the AI think first</b><small>Slower, sometimes smarter picks</small></span><input type="checkbox" data-k="llm_thinking" ${s.llm_thinking ? "checked" : ""}></label></div></div>
-      <div class="set"><div><b>Graphics card</b><p>Your GPU can't hold the AI and Whisper at once, so Clippy pauses the AI service for about a minute while it transcribes.</p></div>
-        <div class="stack"><label class="switch"><span class="ic">${icon("zap")}</span><span class="txt"><b>Pause the AI service while transcribing</b><small>About 10× faster transcription. Off means transcribing on the CPU.</small></span><input type="checkbox" data-k="free_gpu_for_whisper" ${s.free_gpu_for_whisper ? "checked" : ""}></label>
+      <div class="set"><div><b>Graphics card</b><p>Whisper needs about 2.6 GB of graphics memory. When the AI is holding it, Clippy pauses the AI service named below, or asks Ollama to unload its model, and gives the memory back afterwards.</p></div>
+        <div class="stack"><label class="switch"><span class="ic">${icon("zap")}</span><span class="txt"><b>Free the GPU for transcribing</b><small>About 10× faster transcription. Off means transcribing on the CPU when memory is short.</small></span><input type="checkbox" data-k="free_gpu_for_whisper" ${s.free_gpu_for_whisper ? "checked" : ""}></label>
           <label class="field"><span>AI service name (systemd user service)</span><input class="input" data-k="llama_service" autocomplete="off" spellcheck="false" value="${esc(s.llama_service)}" placeholder="llama-coder…"></label>
           <label class="field"><span>Speech-to-text model</span>${sel("whisper_model", s.whisper_model, [["large-v3-turbo", "Large v3 Turbo (best)"], ["medium", "Medium (faster)"], ["small", "Small (fastest)"]])}</label></div></div>
       <div class="set"><div><b>New clips</b><p>The starting point on Make Clips and for new Autopilot channels.</p></div>
@@ -1035,6 +1036,27 @@ pages.settings = async (el) => {
     inp.addEventListener(inp.type === "checkbox" || inp.tagName === "SELECT" ? "change" : "input", () => { cur[k] = read(); mark(); });
   });
   $("#apiKey").oninput = (e) => { keyTyped = e.target.value; mark(); };
+  const setField = (k, v) => { const inp = $(`[data-k="${k}"]`, el); inp.value = v; cur[k] = v; mark(); };
+  const fillModels = (models) => { $("#aiModels").innerHTML = (models || []).map((m) => `<option value="${esc(m)}">`).join(""); };
+  const showAI = async () => {
+    const box = $("#aiBox");
+    if (!box) return;
+    box.innerHTML = `<span class="small muted">Looking for AI servers…</span>`;
+    let r;
+    try { r = await api.get("/api/ai"); } catch (e) { box.innerHTML = `<span class="small">${esc(e.message)}</span>`; return; }
+    const u = r.using;
+    const others = r.servers.filter((s) => !u || s.base !== u.base);
+    box.innerHTML = (u
+      ? `<div class="row" style="gap:10px"><span class="dot ok"></span><span>Using <b>${esc(u.model || "the loaded model")}</b> on ${esc(u.label)}${u.context ? `, ${u.context.toLocaleString()}-token context` : ""}</span></div>`
+      : `<div class="row" style="gap:10px;align-items:flex-start"><span class="dot bad" style="margin-top:7px"></span><span class="small">${esc(r.error)}</span></div>`)
+      + others.map((s, i) => `<div class="row between" style="gap:10px;margin-top:10px"><span class="small"><b>${esc(s.label)}</b><br><span class="muted">${esc(s.models.slice(0, 4).join(", ") || "No chat models")}</span></span><button type="button" class="btn sm" data-use="${i}">Use This</button></div>`).join("")
+      + `<div class="row" style="gap:8px;margin-top:12px">${r.auto ? "" : `<button type="button" class="btn sm quiet" id="aiAuto">Find Automatically</button>`}<button type="button" class="btn sm quiet" id="aiAgain">Look Again</button></div>`;
+    fillModels(u?.models);
+    $$("[data-use]", box).forEach((b) => { b.onclick = () => { const s = others[+b.dataset.use]; setField("llm_url", s.base); setField("llm_model", ""); fillModels(s.models); toast(`Save to switch to ${s.label}`); }; });
+    $("#aiAuto")?.addEventListener("click", () => { setField("llm_url", "auto"); toast("Save to let Clippy find the AI by itself"); });
+    $("#aiAgain").onclick = showAI;
+  };
+  showAI();
   $("#setSave").onclick = async () => {
     const changes = {};
     for (const k of Object.keys(cur)) if (k !== "has_llm_api_key" && String(cur[k]) !== String(orig[k])) changes[k] = cur[k];

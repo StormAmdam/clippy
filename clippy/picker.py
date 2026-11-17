@@ -7,14 +7,13 @@ Two passes:
 """
 from __future__ import annotations
 
-import json
 import re
 import time
 
-import httpx
 import numpy as np
 
 from .config import Settings
+from .llm import LLM, ContextTooSmall, parse_json  # noqa: F401  (LLM/parse_json are part of picker's API)
 
 # ───────────────────────── transcript → sentences ─────────────────────────
 
@@ -46,80 +45,7 @@ def mmss(t: float) -> str:
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
 
 
-# ───────────────────────── LLM client ─────────────────────────
-
-class LLM:
-    def __init__(self, cfg: Settings, log=print):
-        self.cfg = cfg
-        self.base = cfg.llm_url.rstrip("/")
-        self.local = any(h in self.base for h in ("127.0.0.1", "localhost", "0.0.0.0"))
-        self.log = log
-        self.model = cfg.llm_model
-        self.headers = {"Content-Type": "application/json"}
-        if cfg.llm_api_key:
-            self.headers["Authorization"] = f"Bearer {cfg.llm_api_key}"
-        self._schema_ok = True
-        self._kwargs_ok = True
-
-    def wait_ready(self, timeout: float = 300, progress=lambda m: None) -> None:
-        t0 = time.time()
-        last_err = ""
-        while time.time() - t0 < timeout:
-            try:
-                r = httpx.get(self.base + "/models", headers=self.headers, timeout=10)
-                if r.status_code == 200:
-                    data = r.json().get("data") or r.json().get("models") or []
-                    if not self.model and data:
-                        self.model = data[0].get("id") or data[0].get("name") or ""
-                    return
-                last_err = f"HTTP {r.status_code}"
-            except httpx.HTTPError as e:
-                last_err = type(e).__name__
-            progress(f"Waiting for the AI server to be ready ({int(time.time() - t0)}s)…")
-            time.sleep(2)
-        raise RuntimeError(f"AI server at {self.base} is not reachable ({last_err}). "
-                           f"Start it (e.g. `systemctl --user start llama-coder` or `ollama serve`) or change llm_url in config.toml.")
-
-    def json(self, system: str, user: str, schema: dict, max_tokens: int = 3000, temperature: float = 0.4) -> dict:
-        body: dict = {"model": self.model or "default", "temperature": temperature, "max_tokens": max_tokens,
-                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-        for attempt in range(3):
-            b = dict(body)
-            if self._schema_ok:
-                b["response_format"] = {"type": "json_schema",
-                                        "json_schema": {"name": "result", "schema": schema, "strict": True}}
-            else:
-                b["response_format"] = {"type": "json_object"}
-            if self.local and self._kwargs_ok:
-                b["chat_template_kwargs"] = {"enable_thinking": bool(self.cfg.llm_thinking)}
-            try:
-                r = httpx.post(self.base + "/chat/completions", headers=self.headers, json=b, timeout=1200)
-            except httpx.HTTPError as e:
-                if attempt == 2:
-                    raise RuntimeError(f"AI request failed: {e}")
-                time.sleep(3)
-                continue
-            if r.status_code == 400 and (self._schema_ok or self._kwargs_ok):
-                # provider doesn't support json_schema or chat_template_kwargs → degrade gracefully
-                if self._kwargs_ok and "chat_template_kwargs" in b:
-                    self._kwargs_ok = False
-                else:
-                    self._schema_ok = False
-                continue
-            if r.status_code == 429:
-                time.sleep(10 * (attempt + 1))
-                continue
-            if r.status_code != 200:
-                raise RuntimeError(f"AI server error {r.status_code}: {r.text[:300]}")
-            msg = r.json()["choices"][0]["message"]
-            content = msg.get("content") or ""
-            try:
-                return parse_json(content)
-            except ValueError:
-                if attempt == 2:
-                    raise RuntimeError(f"AI returned invalid JSON: {content[:300]}")
-        raise RuntimeError("AI request failed after retries")
-
+# ───────────────────────── post text ─────────────────────────
 
 _HASHTAG = re.compile(r"#\w+")
 _TRAILING_HASHTAGS = re.compile(r"(?:\s*#\w+)+\s*$")
@@ -147,18 +73,6 @@ def tidy_post(caption: str, hashtags, limit: int = 6) -> tuple[str, list[str]]:
             seen.add(h.lower())
             out.append(h)
     return text, out[:limit]
-
-
-def parse_json(text: str) -> dict:
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.S)
-        if m:
-            return json.loads(m.group(0))
-        raise ValueError("no json")
 
 
 # ───────────────────────── prompts ─────────────────────────
@@ -417,12 +331,16 @@ def pick_clips(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m
     llm.wait_ready(progress=lambda m: progress(0.02, m))
     log(f"AI: {llm.model or '(server default)'} at {llm.base}")
 
-    # ── pass 1: scout (chunked if transcript is huge)
+    # ── pass 1: scout, in chunks that fit the server's context window
+    want = cfg.clips
+    limit = llm.budget_chars(out_tokens=400 * max(3, min(15, want * 2 + 1)) + 500)
+    if limit < cfg.llm_chunk_chars:
+        log(f"Context window: {llm.context} tokens, so up to {limit} characters of transcript per request")
     chunks, cur, size = [], [], 0
     for s in sents:
         marks = ("📈 " if s["id"] in hot else "") + ("🔊 " if s["id"] in loud else "")
         line = f"[{s['id']}] {mmss(s['s'])} {marks}{s['text']}"
-        if cur and size + len(line) > cfg.llm_chunk_chars:
+        if cur and size + len(line) > limit:
             chunks.append(cur)
             cur, size = [], 0
         cur.append(line)
@@ -430,15 +348,26 @@ def pick_clips(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m
     if cur:
         chunks.append(cur)
 
-    want = cfg.clips
     per_chunk = max(3, min(15, round(want * 2 / len(chunks)) + 1))
-    cands = []
-    for ci, chunk in enumerate(chunks):
-        progress(0.05 + 0.45 * ci / len(chunks), f"AI is watching the video for the best moments… ({ci + 1}/{len(chunks)})")
+    cands, queue, done = [], list(chunks), 0
+    while queue:
+        chunk = queue.pop(0)
+        total_parts = done + len(queue) + 1
+        progress(0.05 + 0.45 * done / total_parts, f"AI is watching the video for the best moments… ({done + 1}/{total_parts})")
         t0 = time.time()
-        out = llm.json(SYSTEM, _scout_prompt(info, "\n".join(chunk), per_chunk, cfg, wps), SCOUT_SCHEMA,
-                       max_tokens=400 * per_chunk + 500, temperature=0.4)
-        log(f"Scout pass {ci + 1}/{len(chunks)}: {len(out.get('clips', []))} candidates in {time.time() - t0:.0f}s")
+        try:
+            out = llm.json(SYSTEM, _scout_prompt(info, "\n".join(chunk), per_chunk, cfg, wps), SCOUT_SCHEMA,
+                           max_tokens=400 * per_chunk + 500, temperature=0.4)
+        except ContextTooSmall:
+            if len(chunk) < 4:
+                raise RuntimeError("The AI's context window is too small for even a few lines of transcript. "
+                                   "Load the model with a bigger context (16384 or more) and try again.")
+            half = len(chunk) // 2
+            queue[:0] = [chunk[:half], chunk[half:]]
+            log(f"That part was too long for the AI's context window; splitting it in two ({len(chunk)} lines)")
+            continue
+        done += 1
+        log(f"Scout pass {done}/{done + len(queue)}: {len(out.get('clips', []))} candidates in {time.time() - t0:.0f}s")
         cands.extend(out.get("clips", []))
 
     # validate + rank

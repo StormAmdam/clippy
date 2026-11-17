@@ -1,7 +1,8 @@
-"""Command line: ./clippy <youtube-url> [options]   |   ./clippy web"""
+"""Command line: ./clippy <youtube-url> [options]   |   ./clippy web   |   ./clippy auto   |   ./clippy ai [test]"""
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 
@@ -16,6 +17,8 @@ def main(argv: list[str] | None = None) -> int:
         return web(argv[1:])
     if argv and argv[0] == "auto":
         return _auto(argv[1:])
+    if argv and argv[0] == "ai":
+        return _ai(argv[1:])
 
     ap = argparse.ArgumentParser(prog="clippy", description="Turn a YouTube video into ready-to-post vertical clips.")
     ap.add_argument("url", help="YouTube link (or a local video file)")
@@ -113,3 +116,41 @@ def _auto(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def _ai(argv: list[str]) -> int:
+    """clippy ai: which AI servers are running and which model Clippy will use.  clippy ai test: time a request."""
+    from . import llm
+    cfg = config.load()
+    found = llm.detect()
+    using, error = None, ""
+    try:
+        s = llm.resolve(cfg)
+        using = {**s.to_dict(), "model": llm.choose_model(s, cfg.llm_model)}
+    except RuntimeError as e:
+        error = str(e)
+    if "--json" in argv:
+        print(json.dumps({"servers": [f.to_dict() for f in found], "using": using, "error": error}))
+        return 0 if using else 1
+    if found:
+        print("AI servers found:")
+        for f in found:
+            models = [m for m in f.models if llm.can_chat(m)]
+            more = f" and {len(models) - 5} more" if len(models) > 5 else ""
+            print(f"  {f.label}: {', '.join(models[:5]) or 'no chat models'}{more}")
+    else:
+        print("No AI server is running on the usual ports" + (" here or on Windows." if llm.wsl() else "."))
+    if not using:
+        print("\n" + error)
+        return 1
+    how = "found automatically" if (cfg.llm_url or "auto").lower() == "auto" else "from your settings"
+    print(f"\nClippy will use {using['model'] or 'the loaded model'} on {using['label']} ({how}).")
+    if argv[:1] == ["test"]:
+        c = llm.LLM(cfg, log=print)
+        c.wait_ready(timeout=20)
+        t0 = time.time()
+        out = c.json("You answer in JSON.", 'Reply with {"ok": true, "word": "<one word describing space>"}.',
+                     {"type": "object", "properties": {"ok": {"type": "boolean"}, "word": {"type": "string"}},
+                      "required": ["ok", "word"]}, max_tokens=300, temperature=0)
+        print(f"Test answer in {time.time() - t0:.1f}s: {out}  (context window: {c.context or 'unknown'} tokens)")
+    return 0

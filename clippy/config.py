@@ -12,12 +12,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass
 class Settings:
-    # ── AI that picks the clips (any OpenAI-compatible server: llama.cpp, Ollama, Groq, Gemini…)
-    llm_url: str = "http://127.0.0.1:8080/v1"
-    llm_model: str = ""            # empty = whatever model the server has loaded
+    # ── AI that picks the clips (llama.cpp, Ollama, LM Studio, Jan, vLLM… or any OpenAI-compatible API)
+    llm_url: str = "auto"          # auto = find a local server by itself; or an address like http://127.0.0.1:11434/v1
+    llm_model: str = ""            # empty = the loaded model, else the newest download that can chat
     llm_api_key: str = ""
     llm_thinking: bool = False     # let the model "think" first (slower, sometimes smarter)
-    llm_chunk_chars: int = 60000   # transcript size per request (~15k tokens)
+    llm_chunk_chars: int = 60000   # most transcript per request (~20k tokens); less when the server's context is smaller
+    llm_context: int = 0           # tokens per request; 0 = ask the server (Ollama: 16384)
 
     # ── GPU
     llama_service: str = "llama-coder"   # systemd --user service to pause while Whisper uses the GPU ("" = never)

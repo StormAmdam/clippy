@@ -13,6 +13,11 @@ import time
 _loaded = False
 
 
+def nvidia_smi() -> str | None:
+    """nvidia-smi, also inside WSL where it lives in /usr/lib/wsl/lib and isn't always on PATH."""
+    return shutil.which("nvidia-smi") or next((p for p in ("/usr/lib/wsl/lib/nvidia-smi",) if os.access(p, os.X_OK)), None)
+
+
 def preload_cuda_libs() -> None:
     """CTranslate2 (faster-whisper) needs cuBLAS 12 + cuDNN 9. They come from pip
     (nvidia-cublas-cu12 / nvidia-cudnn-cu12); preload them so no system CUDA install is needed."""
@@ -37,10 +42,11 @@ def preload_cuda_libs() -> None:
 
 
 def free_vram_mb() -> int | None:
-    if not shutil.which("nvidia-smi"):
+    smi = nvidia_smi()
+    if not smi:
         return None
     try:
-        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+        out = subprocess.run([smi, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
                              capture_output=True, text=True, timeout=5).stdout.strip().splitlines()
         return int(out[0]) if out else None
     except Exception:
@@ -75,6 +81,16 @@ def has_cuda_decode() -> bool:
 
 def _systemctl(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=60)
+
+
+def service_known(name: str) -> bool:
+    """Is there a systemd user service by this name (running or not)?"""
+    if not name or not shutil.which("systemctl"):
+        return False
+    try:
+        return _systemctl("cat", name).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def service_active(name: str) -> bool:

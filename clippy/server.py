@@ -5,6 +5,8 @@ import argparse
 import ipaddress
 import json
 import queue
+import shutil
+import subprocess
 import threading
 import time
 import traceback
@@ -250,30 +252,46 @@ def autostart_set(body: AutostartIn):
 
 # ───────────────────────── status & overview (dashboard) ─────────────────────────
 
-_llm_cache = {"t": 0.0, "ok": False, "model": ""}
+_llm_cache = {"t": 0.0, "ok": False, "model": "", "server": "", "error": ""}
 
 
 @app.get("/api/status")
 def status():
-    import httpx
-
-    from . import gpu
+    from . import gpu, llm
     cfg = config.load()
     if time.time() - _llm_cache["t"] > 10:
-        ok, model = False, ""
         try:
-            r = httpx.get(cfg.llm_url.rstrip("/") + "/models", timeout=1.5)
-            ok = r.status_code == 200
-            data = r.json().get("data") or []
-            model = cfg.llm_model or (data[0].get("id") if data else "")
-        except Exception:
-            pass
-        _llm_cache.update(t=time.time(), ok=ok, model=model)
+            s = llm.resolve(cfg)
+            _llm_cache.update(ok=True, model=llm.choose_model(s, cfg.llm_model), server=s.label, error="")
+        except RuntimeError as e:
+            _llm_cache.update(ok=False, model="", server="", error=str(e))
+        _llm_cache["t"] = time.time()
     jobs = STORE.all()
     running = next((j for j in jobs if j["state"] == "running"), None)
-    return {"llm": _llm_cache["ok"], "model": _llm_cache["model"], "vram_free": gpu.free_vram_mb(),
+    return {"llm": _llm_cache["ok"], "model": _llm_cache["model"], "ai": _llm_cache["server"],
+            "ai_error": _llm_cache["error"], "vram_free": gpu.free_vram_mb(),
             "queued": sum(1 for j in jobs if j["state"] == "queued"),
             "running": {k: running.get(k) for k in ("id", "kind", "url", "stage", "pct", "msg", "profile_id")} if running else None}
+
+
+@app.get("/api/ai")
+def ai_servers():
+    """Every AI server Clippy can see right now, and the one (and model) it would use."""
+    from . import llm
+    cfg = config.load()
+    found = llm.detect()
+    using, error = None, ""
+    try:
+        llm._cache.clear()
+        s = llm.resolve(cfg)
+        using = {**s.to_dict(), "model": llm.choose_model(s, cfg.llm_model)}
+        if all(f.base != s.base for f in found):
+            found.insert(0, s)
+    except RuntimeError as e:
+        error = str(e)
+    _llm_cache["t"] = 0.0
+    return {"auto": (cfg.llm_url or "auto").lower() == "auto", "servers": [f.to_dict() for f in found],
+            "using": using, "error": error, "wsl": llm.wsl()}
 
 
 @app.get("/api/overview")
@@ -635,6 +653,22 @@ def _already_running(url: str) -> bool:
         return False
 
 
+def _open_browser(url: str) -> None:
+    """Open the app; inside WSL that means the Windows browser (WSL forwards localhost to Windows)."""
+    from .llm import wsl
+    if wsl():
+        for cmd in (["wslview", url], ["cmd.exe", "/c", "start", "", url], ["explorer.exe", url]):
+            if shutil.which(cmd[0]):
+                try:
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd="/")
+                    return
+                except OSError:
+                    continue
+        print(f"  Open {url} in your Windows browser.", flush=True)
+        return
+    webbrowser.open(url)
+
+
 def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
@@ -649,10 +683,10 @@ def main(argv: list[str] | None = None) -> int:
     if _already_running(url):
         print(f"\n  Clippy is already running →  {url}\n", flush=True)
         if not a.no_browser:
-            webbrowser.open(url)
+            _open_browser(url)
         return 0
     print(f"\n  Clippy is running →  {url}\n  (Ctrl+C to stop)\n", flush=True)
     if not a.no_browser:
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.2, lambda: _open_browser(url)).start()
     uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
     return 0
