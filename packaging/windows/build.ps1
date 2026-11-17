@@ -21,8 +21,12 @@ New-Item -ItemType Directory -Force $App | Out-Null
 Step "Python (relocatable build, lives inside the app folder)"
 $pyTmp = Join-Path $Out "py"
 Run uv python install 3.13 --install-dir $pyTmp
-$pyDir = Get-ChildItem $pyTmp -Directory | Where-Object { Test-Path (Join-Path $_.FullName "python.exe") } | Select-Object -First 1
-Move-Item $pyDir.FullName (Join-Path $App "python")
+# uv also makes a "cpython-3.13-…" shortcut (junction) to the real "cpython-3.13.N-…" folder: take the real one
+$pyDir = Get-ChildItem $pyTmp -Directory |
+  Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and (Test-Path (Join-Path $_.FullName "python.exe")) } |
+  Select-Object -First 1
+if (-not $pyDir) { throw "uv didn't install a Python folder" }
+Copy-Item -Recurse $pyDir.FullName (Join-Path $App "python")
 Remove-Item -Recurse -Force $pyTmp
 $Py = Join-Path $App "python\python.exe"
 & $Py -m pip --version 2>$null; if ($LASTEXITCODE) { Run $Py -m ensurepip }
