@@ -20,8 +20,22 @@ What the project owner does (once):
    **API token**. Add the API token to the repository as a secret named `SIGNPATH_API_TOKEN` (GitHub → Settings →
    Secrets and variables → Actions), and send the other three to whoever wires up the workflow.
 
-Signed releases then carry the line *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"*
-on the release page (one of SignPath's conditions).
+SignPath's conditions for the project page are already in the README: the **Code signing policy** section (their
+attribution line and who commits, reviews and approves) and the **Privacy** section. Signed releases also carry the
+attribution line *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"* in their release
+notes.
+
+The application form, field by field:
+
+| Field | What to put |
+|---|---|
+| Project Name | Clippy |
+| Repository URL | https://github.com/StormAmdam/clippy |
+| Homepage URL | https://github.com/StormAmdam/clippy |
+| Download URL | https://github.com/StormAmdam/clippy#install |
+| Privacy Policy URL | https://github.com/StormAmdam/clippy#privacy |
+| Wikipedia URL | (empty) |
+| Tagline | Clippy turns long videos into captioned vertical shorts on your own PC, with a local AI that picks the best moments. |
 
 ## What changes in the workflow
 

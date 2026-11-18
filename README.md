@@ -281,6 +281,42 @@ FastAPI server (`clippy/server.py`) with a vanilla-JS front end (`clippy/static/
 `download → transcribe → picker / highlights → reframe → overlay → render`.
 To move an install with all its data to another PC, see [MOVING.md](MOVING.md).
 
+## Privacy
+
+Clippy runs on your PC. It has no accounts, ads, analytics or telemetry, and your videos, transcripts and shorts stay
+on your computer. It connects to the internet only for these:
+
+- **When you ask:**
+  - downloading a YouTube video you give it, and finding videos or watching the channels you add to Autopilot (YouTube)
+  - downloading the AI models, AI engine and tools you pick in AI & Tools (Hugging Face, GitHub)
+  - browsing and installing extensions (GitHub)
+  - uploading shorts to your own YouTube channel after you sign in with Google (the login stays on your PC)
+  - an AI app you connect yourself gets the transcript text it picks clips from
+- **By itself:**
+  - when it opens, it asks GitHub whether there's a newer version (Settings → Updates turns this off)
+  - the Windows app refreshes its YouTube download tool (yt-dlp) from PyPI every few days, because YouTube changes
+    often (`CLIPPY_NO_UPDATES=1` turns this off)
+
+  These two send nothing about you or your videos, only what any web request carries (your IP address).
+
+Those services have their own privacy policies: [YouTube and Google](https://policies.google.com/privacy),
+[GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement),
+[Hugging Face](https://huggingface.co/privacy) and [PyPI](https://policies.python.org/pypi.org/Privacy-Notice/).
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). (Applied for: Windows releases are signed from the first release after
+approval. Earlier releases aren't signed; see [why Windows warns](docs/code-signing.md).)
+
+- Committers and reviewers: [StormAmdam](https://github.com/StormAmdam)
+- Approvers: [StormAmdam](https://github.com/StormAmdam)
+
+Every Windows release is built from this repository's source by GitHub Actions
+([`windows-app.yml`](.github/workflows/windows-app.yml)), and the project owner approves each signing request.
+Changes from others (pull requests) are reviewed before they're merged. Clippy can be removed completely: the Windows
+uninstaller (Settings → Apps), or `clippy uninstall` on Linux.
+
 ## Copyright
 
 Platforms don't pay for reposted content you don't have the rights to, and it gets claimed. Clip your own videos,
