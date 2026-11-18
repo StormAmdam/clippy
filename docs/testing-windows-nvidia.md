@@ -46,12 +46,18 @@ installer say anything unusual?
      sees an NVIDIA card.
    - **AI engine** should say **"llama.cpp b…, runs on your NVIDIA graphics card"**.
 
-**Note:** what do those two lines say? If anything failed, copy the error text. If the AI engine says "runs on your
-processor", press its remove button, download it again, and note what it says then.
+3. Go to **Settings**. Under **AI that picks the clips** it should say **Using Qwen… on Built-in AI**, not a model from
+   another AI app you have (like Ollama).
+
+**Note:** what do those lines say? If anything failed, copy the error text. If the AI engine says "runs on your
+processor", press its remove button, download it again, and note what it says then. If you already had a model
+downloaded, the AI engine may say it "downloads by itself on the next video": that's fine, or press its Download
+button.
 
 ## 3. Make clips
 
-1. Go to **Make Clips**, paste the YouTube link, and press **Make Clips**.
+1. Go to **Make Clips**, paste the YouTube link, and press **Make Clips**. (Clippy should have opened in its own
+   window, not as a tab in your browser.)
 2. Keep Task Manager open on Performance → GPU while it works.
 3. Watch the progress text in Clippy:
    - while transcribing it should say **"Transcribing on CUDA…"** (CUDA means the graphics card). "Transcribing on
@@ -59,6 +65,9 @@ processor", press its remove button, download it again, and note what it says th
    - during **"AI is watching the video for the best moments…"** the GPU's memory use in Task Manager should go up.
    - during **"Rendering…"**, Task Manager's GPU page should show activity in the **Video Encode** graph (you may
      have to click a graph's title and pick "Video Encode").
+
+If YouTube answers **"Sign in to confirm you're not a bot"**, wait a few minutes and press Make Clips again: YouTube
+sometimes limits a home connection for a while. Any other error: take a screenshot.
 
 **Note:** how long did the whole video take? Did it say CUDA or CPU while transcribing? Did Video Encode show
 activity while rendering? Do the finished shorts play properly, with captions and emojis?
