@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import config
+from .download import ytdlp
 
 NICHES: dict[str, list[str]] = {
     "podcasts": ["podcast full episode", "podcast interview"],
@@ -74,7 +75,7 @@ def search_url(query: str, **kw) -> str:
 
 
 def _flat(url: str, limit: int) -> list[dict]:
-    r = subprocess.run(["yt-dlp", "--flat-playlist", "-J", "--no-warnings", "--playlist-end", str(limit), url],
+    r = subprocess.run([*ytdlp(), "--flat-playlist", "-J", "--no-warnings", "--playlist-end", str(limit), url],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     if r.returncode != 0 or not r.stdout.strip():
         return []
@@ -87,7 +88,7 @@ def _flat(url: str, limit: int) -> list[dict]:
 def _enrich(ids: list[str]) -> list[dict]:
     if not ids:
         return []
-    r = subprocess.run(["yt-dlp", "--skip-download", "--no-warnings", "--ignore-errors", "--no-playlist",
+    r = subprocess.run([*ytdlp(), "--skip-download", "--no-warnings", "--ignore-errors", "--no-playlist",
                         "--print", "%(.{" + FIELDS + "})j"] + [f"https://www.youtube.com/watch?v={i}" for i in ids],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60 + 20 * len(ids))
     out = []
@@ -112,7 +113,7 @@ def _channel_subs(cids: list[str]) -> dict[str, int]:
 
     def one(cid):
         try:
-            r = subprocess.run(["yt-dlp", "--flat-playlist", "--no-warnings", "--playlist-end", "1", "-J",
+            r = subprocess.run([*ytdlp(), "--flat-playlist", "--no-warnings", "--playlist-end", "1", "-J",
                                 f"https://www.youtube.com/channel/{cid}"], capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=60)
             subs = json.loads(r.stdout).get("channel_follower_count") if r.returncode == 0 else None

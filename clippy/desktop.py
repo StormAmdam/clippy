@@ -29,8 +29,11 @@ def _browser() -> list[str] | None:
         return [os.environ["CLIPPY_BROWSER"]]
     if sys.platform == "win32":
         env = os.environ.get
-        for base in (env("ProgramFiles(x86)"), env("ProgramFiles"), env("LOCALAPPDATA")):
-            for rel in (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe"):
+        # all of these open app windows (Edge can be uninstalled), in this order, wherever each one is installed
+        for rel in (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe",
+                    r"BraveSoftware\Brave-Browser\Application\brave.exe", r"Vivaldi\Application\vivaldi.exe",
+                    r"Chromium\Application\chrome.exe"):
+            for base in (env("ProgramFiles(x86)"), env("ProgramFiles"), env("LOCALAPPDATA")):
                 if base and os.path.exists(p := os.path.join(base, rel)):
                     return [p]
         return None
@@ -117,6 +120,17 @@ def _keep_running() -> bool:
         return False
 
 
+def _update_youtube_tool(server) -> None:
+    """Windows app: keep yt-dlp current (see components.update_ytdlp), once Clippy is idle."""
+    from . import components
+    time.sleep(60)                                     # let Clippy finish starting first
+    for _ in range(240):                               # never under a running job (it may be using yt-dlp)
+        if not server.work_in_progress() and not any(s["state"] == "running" for s in server.SCANS.values()):
+            components.update_ytdlp(log=lambda m: print(m, flush=True))
+            return
+        time.sleep(30)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv or [])
     background = "--background" in argv
@@ -156,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Clippy is running at {url}" + (" (in the background)" if background else ""), flush=True)
     server.UI_SEEN["t"] = time.time()
     server.APP["desktop"] = True
+    if sys.platform == "win32" and os.environ.get("CLIPPY_NO_UPDATES") != "1":
+        threading.Thread(target=_update_youtube_tool, args=(server,), daemon=True, name="yt-dlp-update").start()
     win = None if background else open_window(url)
     try:
         tick = 0

@@ -144,3 +144,52 @@ def test_external_mode_skips_the_built_in_ai(app_dirs, monkeypatch):
     llm._cache.clear()
     with pytest.raises(RuntimeError, match="No local AI server found|Clippy has no AI to pick clips with yet"):
         llm.resolve(Settings(ai_mode="external"))
+
+
+def test_a_downloaded_model_is_used_and_gets_its_engine_when_needed(app_dirs, monkeypatch):
+    # what happened on Windows: Qwen downloaded in the app, its engine skipped because Ollama was running
+    components.LLM_DIR.mkdir(parents=True)
+    (components.LLM_DIR / "Qwen3.5-4B-Q4_K_M.gguf").write_bytes(b"x")
+    monkeypatch.setattr(llm, "detect", lambda **k: [llm.Server("http://o/v1", "Ollama", ["translategemma:12b"],
+                                                               ["translategemma:12b"])])
+    s = llm.resolve(Settings())
+    assert s.kind == "Built-in AI" and s.models == ["Qwen3.5-4B-Q4_K_M"]     # not Ollama's translation model
+    assert "ai" not in components.missing(Settings())
+    installs = []
+
+    def fake_engine_install(task, cfg):
+        installs.append(cfg)
+        if len(installs) == 1:
+            raise RuntimeError("no internet")
+        build = components.ENGINE_DIR / "b1-cpu"
+        build.mkdir(parents=True)
+        (build / f"llama-server{components.EXE}").write_bytes(b"x")
+        (components.ENGINE_DIR / "current.txt").write_text("b1-cpu")
+
+    name, about, status, _, remove, gb = components.PARTS["engine"]
+    monkeypatch.setitem(components.PARTS, "engine", (name, about, status, fake_engine_install, remove, gb))
+    with pytest.raises(RuntimeError, match="couldn't download the AI engine \\(no internet\\).*AI & Tools"):
+        engine.ensure_engine(Settings())
+    logs = []
+    engine.ensure_engine(Settings(), log=logs.append)
+    assert len(installs) == 2 and components.engine_exe() and "AI engine" in logs[0]
+    engine.ensure_engine(Settings())                                          # there now: nothing to do
+    engine.ensure_engine(Settings(ai_mode="external"))                        # "Another App": never
+    assert len(installs) == 2
+
+
+def test_another_app_mode_marks_no_built_in_model_as_in_use(app_dirs):
+    components.LLM_DIR.mkdir(parents=True)
+    (components.LLM_DIR / "Qwen3.5-4B-Q4_K_M.gguf").write_bytes(b"x")
+    active = lambda cfg: [m["id"] for m in engine.models(cfg) if m["active"]]
+    assert active(Settings()) == ["Qwen3.5-4B-Q4_K_M"]
+    assert active(Settings(ai_mode="external")) == []
+
+
+def test_set_up_everything_ignores_an_app_that_only_has_a_translation_model(app_dirs, monkeypatch):
+    found = [llm.Server("http://o/v1", "Ollama", ["translategemma:12b"], ["translategemma:12b"])]
+    monkeypatch.setattr(llm, "detect", lambda **k: found)
+    assert not engine._other_ai(Settings())                                  # so the built-in AI gets set up
+    found[0].models = found[0].recent = ["translategemma:12b", "qwen3.5:9b"]
+    llm._cache.clear()
+    assert engine._other_ai(Settings())                                      # a good model there: no download

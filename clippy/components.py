@@ -219,6 +219,10 @@ def engine_exe() -> Path | None:
 def _engine_status(cfg) -> dict:
     exe = engine_exe()
     if not exe:
+        from . import engine
+        if engine.model_path(cfg) and (cfg.ai_mode or "auto").lower() != "external":
+            return {"installed": False, "detail": "Runs your downloaded AI model. It downloads by itself on the next "
+                                                  "video, or now"}
         return {"installed": False, "detail": "Runs the AI model on this PC (no extra app needed)"}
     tag, _, variant = exe.parent.name.partition("-")
     how = {"cuda": "NVIDIA graphics card", "vulkan": "AMD/Intel graphics card", "cpu": "processor"}.get(variant, variant)
@@ -284,6 +288,38 @@ def _pip(*args: str) -> None:
                        capture_output=True, text=True, encoding="utf-8", errors="replace", **hidden())
     if r.returncode:
         raise RuntimeError((r.stderr or r.stdout).strip()[-400:])
+
+
+YTDLP_STAMP = ROOT / "data" / "yt-dlp-updated.txt"
+
+
+def ytdlp_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("yt-dlp")
+    except PackageNotFoundError:
+        return ""
+
+
+def update_ytdlp(max_age_days: float = 3, log=print) -> bool:
+    """Keep the YouTube downloader current: YouTube changes often and older yt-dlp versions stop working. On Linux
+    setup.sh does this; the Windows app does it by itself, at most every few days. Only yt-dlp and what it needs
+    are touched. True when it ran."""
+    try:
+        if time.time() - YTDLP_STAMP.stat().st_mtime < max_age_days * 86400:
+            return False
+    except OSError:
+        pass
+    before = ytdlp_version()
+    try:
+        _pip("install", "--upgrade", "--no-warn-script-location", "yt-dlp[default]")
+    except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+        log(f"Couldn't update yt-dlp (it tries again next time): {str(e)[-200:]}")
+        return False
+    YTDLP_STAMP.parent.mkdir(parents=True, exist_ok=True)
+    YTDLP_STAMP.write_text(f"{before} -> {ytdlp_version()}\n", encoding="utf-8")
+    log(f"yt-dlp {before} is up to date" if before == ytdlp_version() else f"Updated yt-dlp {before} -> {ytdlp_version()}")
+    return True
 
 
 def _gpu_install(task: Task, cfg) -> None:

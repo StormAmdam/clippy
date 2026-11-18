@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 100
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CLIPPY_NO_UPDATES: "1"     # the app's own yt-dlp update; smoke.py tests it directly
       CLIPPY_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.1.0-dev.{0}', github.run_number) }}
     steps:
       - uses: actions/checkout@v4

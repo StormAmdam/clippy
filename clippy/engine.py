@@ -58,18 +58,20 @@ def recommended(hw: dict) -> str:
 def models(cfg) -> list[dict]:
     hw = components.hardware()
     active = model_path(cfg)
+    builtin = (cfg.ai_mode or "auto").lower() != "external"      # "Another App" doesn't use these
     rows = []
     for m in CATALOG:
         p = components.LLM_DIR / m["file"]
         t = components.TASKS.get("model:" + m["id"])
         rows.append({k: v for k, v in m.items() if k != "fits"} | {
-            "installed": p.exists(), "active": active == p, "fits": m["fits"](hw["vram_mb"], hw["ram_mb"]),
+            "installed": p.exists(), "active": active == p and builtin, "fits": m["fits"](hw["vram_mb"], hw["ram_mb"]),
             "recommended": m["id"] == recommended(hw), "task": t.to_dict() if t and t.state != "done" else None})
     known = {m["file"] for m in CATALOG}
     for p in _files():                                  # models added from a link
         if p.name not in known:
             rows.append({"id": p.stem, "name": p.stem, "about": "Added by you", "file": p.name, "url": "", "page": "",
-                         "gb": round(p.stat().st_size / 1e9, 1), "installed": True, "active": active == p, "fits": True,
+                         "gb": round(p.stat().st_size / 1e9, 1), "installed": True, "active": active == p and builtin,
+                         "fits": True,
                          "recommended": False, "task": None, "custom": True})
     return rows
 
@@ -103,6 +105,9 @@ def install_model(mid: str = "", url: str = "") -> components.Task:
         if size and size + 2e9 > free:
             raise RuntimeError(f"Not enough free disk space: {aisetup.human(size)} needed plus 2 GB to spare.")
         components.fetch(link, components.LLM_DIR / name, t, label)
+        if not components.engine_exe():                  # a model is no use without the engine that runs it
+            t.label, t.done, t.total = "AI engine", 0, 0
+            components.PARTS["engine"][3](t, config.load())
 
     return components.run_task(tid, label, go)
 
@@ -220,13 +225,31 @@ ENGINE = Engine()
 atexit.register(ENGINE.stop)
 
 
+def ensure_engine(cfg, log=lambda m: None, progress=lambda m: None) -> None:
+    """A model is downloaded for the built-in AI but the engine that runs it isn't (it was skipped because another AI
+    app was found, or removed): get it now, once, like Whisper downloads itself on the first video."""
+    if components.engine_exe() or (cfg.ai_mode or "auto").lower() == "external" or model_path(cfg) is None:
+        return
+    log("Getting the AI engine that runs your downloaded model (about 600 MB, only this once)…")
+    t = components.install("engine", cfg)
+    while t.state == "running":
+        progress(f"Getting the AI engine… {aisetup.human(t.done)} of {aisetup.human(t.total)}" if t.total
+                 else "Getting the AI engine…")
+        time.sleep(1)
+    if t.state != "done" or not components.engine_exe():
+        raise RuntimeError(f"Clippy couldn't download the AI engine ({t.error or t.state}). Open AI & Tools and press "
+                           "Download next to AI engine.")
+
+
 def server(cfg, start: bool = False):
-    """The built-in AI as an llm.Server; started first when `start` is set. None without engine or model."""
+    """The built-in AI as an llm.Server; started first when `start` is set (getting its engine first if needed).
+    None without a downloaded model."""
     from .llm import Server
     model = model_path(cfg)
-    if not (components.engine_exe() and model):
+    if not model:
         return None
     if start:
+        ensure_engine(cfg)
         ENGINE.start(cfg, model)
     running = ENGINE.running() and ENGINE.model == model
     return Server(ENGINE.base if running else "", "Built-in AI", [model.stem],
@@ -242,12 +265,12 @@ def setup_everything(cfg) -> components.Task:
                 components.PARTS[c["id"]][3](t, cfg)
                 t.done = t.total = 0
         if model_path(cfg) is None and not _other_ai(cfg):
-            if not components.engine_exe():
-                t.label = "AI engine"
-                components.PARTS["engine"][3](t, cfg)
             m = next(m for m in CATALOG if m["id"] == recommended(components.hardware()))
             t.label = m["name"]
             components.fetch(m["url"], components.LLM_DIR / m["file"], t, m["name"])
+        if model_path(cfg) is not None and not components.engine_exe() and (cfg.ai_mode or "auto") != "external":
+            t.label, t.done, t.total = "AI engine", 0, 0       # the model downloaded earlier needs it too
+            components.PARTS["engine"][3](t, cfg)
         components.ensure_path()
     return components.run_task("everything", "Setting up", go)
 
@@ -257,6 +280,8 @@ def _other_ai(cfg) -> bool:
     if (cfg.ai_mode or "auto") == "builtin":
         return False
     try:
-        return llm.resolve(cfg).kind != "Built-in AI"
+        s = llm.resolve(cfg)
     except RuntimeError:
         return False
+    # an app with only a specialist (a translation model, say) doesn't count: it would pick clips badly
+    return s.kind != "Built-in AI" and llm.model_rank(llm.choose_model(s, cfg.llm_model)) < 2

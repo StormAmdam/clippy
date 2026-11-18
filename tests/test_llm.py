@@ -114,14 +114,33 @@ def test_probe_returns_none_when_nothing_answers():
 
 
 def test_choose_model_skips_embeddings_and_prefers_what_is_loaded():
-    ollama = llm.Server("http://x/v1", "Ollama", ["nomic-embed-text:latest", "qwen3.5:9b", "gemma3:4b"], [],
-                        recent=["nomic-embed-text:latest", "qwen3.5:9b", "gemma3:4b"])
-    assert llm.choose_model(ollama) == "qwen3.5:9b"                   # newest pull that can chat
-    ollama.loaded = ["gemma3:4b"]
-    assert llm.choose_model(ollama) == "gemma3:4b"                    # already in memory: no load wait
-    assert llm.choose_model(ollama, "llama3.2:3b") == "llama3.2:3b"   # your setting always wins
+    ollama = llm.Server("http://x/v1", "Ollama", ["nomic-embed-text:latest", "gemma3:4b", "llama3.2:3b"], [],
+                        recent=["nomic-embed-text:latest", "gemma3:4b", "llama3.2:3b"])
+    assert llm.choose_model(ollama) == "gemma3:4b"                    # newest pull that can chat
+    ollama.loaded = ["llama3.2:3b"]
+    assert llm.choose_model(ollama) == "llama3.2:3b"                  # already in memory: no load wait
+    assert llm.choose_model(ollama, "gemma3:4b") == "gemma3:4b"       # your setting always wins
     embed_only = llm.Server("http://x/v1", "OpenAI-compatible", ["bge-m3", "text-embedding-3-small"], [])
     assert llm.choose_model(embed_only) == ""
+
+
+def test_a_qwen_model_beats_a_translation_model_even_when_that_one_is_loaded():
+    # what happened on Windows: Ollama had translategemma loaded and newest, and a Qwen pulled for Clippy
+    ollama = llm.Server("http://x/v1", "Ollama", ["translategemma:12b", "gemma3:4b", "qwen3.5:9b"],
+                        ["translategemma:12b"], recent=["translategemma:12b", "gemma3:4b", "qwen3.5:9b"])
+    assert llm.choose_model(ollama) == "qwen3.5:9b"                   # Ollama loads it by itself
+    ollama.models = ollama.recent = ["translategemma:12b", "qwen2.5-coder:7b", "gemma3:4b"]
+    assert llm.choose_model(ollama) == "gemma3:4b"                    # no Qwen: any general model before specialists
+    ollama.models = ollama.recent = ["translategemma:12b", "qwen2.5-coder:7b"]
+    assert llm.choose_model(ollama) == "translategemma:12b"           # only specialists: better than nothing
+
+
+def test_apps_that_only_serve_the_loaded_model_keep_it():
+    lms = llm.Server("http://x/v1", "LM Studio", ["qwen3.5-9b", "llama-3.1-8b", "translategemma-12b"],
+                     ["llama-3.1-8b"])
+    assert llm.choose_model(lms) == "llama-3.1-8b"                    # LM Studio may not load another one by itself
+    lms.loaded = ["translategemma-12b", "llama-3.1-8b"]
+    assert llm.choose_model(lms) == "llama-3.1-8b"                    # but a loaded general model beats a specialist
 
 
 def test_detect_finds_servers_on_the_given_ports_loaded_ones_first(serve):

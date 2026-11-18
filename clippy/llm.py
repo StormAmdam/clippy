@@ -72,19 +72,41 @@ class Server:
                 "models": [m for m in self.models if can_chat(m)], "loaded": self.loaded}
 
 
+# Models made for one narrow job (translating, writing code, filtering unsafe text, reading images): they can chat,
+# but pick clips badly, so they're only used when nothing else is there.
+SPECIALIST = re.compile(r"translat|nllb|madlad|seamless|opus-mt|guard|shield|ocr|moondream|"
+                        r"cod(?:er|ellama|egemma|estral)|starcoder|devstral|math|sql", re.I)
+PREFERRED = re.compile(r"qwen3", re.I)                # what Clippy's instructions are written and tested with
+
+
 def can_chat(model: str) -> bool:
     return bool(model) and not NOT_CHAT.search(model)
 
 
+def model_rank(model: str) -> int:
+    """0: Qwen 3 (Clippy's instructions are made with it), 1: another general model, 2: a specialist."""
+    return 2 if SPECIALIST.search(model) else 0 if PREFERRED.search(model) else 1
+
+
 def choose_model(server: Server, wanted: str = "") -> str:
-    """Your setting wins; otherwise a chat model that's already loaded, then Ollama's newest download, then the first."""
+    """Your setting wins. Otherwise the best kind of model (model_rank), and within a kind one that's already loaded,
+    then the newest download. Ollama loads any model by itself, so there the kind comes first; other apps may only
+    serve what's loaded, so there a loaded model comes first."""
     if wanted:
         return wanted
-    for pool in (server.loaded, server.recent, server.models):
-        for m in pool:
-            if can_chat(m):
-                return m
-    return ""
+    seen: dict[str, tuple] = {}
+    for p, pool in enumerate((server.loaded, server.recent, server.models)):
+        for i, m in enumerate(pool):
+            if can_chat(m) and m not in seen:
+                seen[m] = (p == 0, p, i)
+    if not seen:
+        return ""
+    on_demand = server.kind == "Ollama"
+
+    def key(m: str):
+        loaded, p, i = seen[m]
+        return (model_rank(m), not loaded, p, i) if on_demand else (not loaded, model_rank(m), p, i)
+    return min(seen, key=key)
 
 
 def normalize(url: str) -> str:
@@ -311,7 +333,8 @@ class LLM:
 
     def wait_ready(self, timeout: float = 300, progress=lambda m: None) -> None:
         """Connect to the AI server; waits for one that is (re)starting, gives up fast if none is expected."""
-        from . import gpu
+        from . import engine, gpu
+        engine.ensure_engine(self.cfg, log=self.log, progress=progress)   # a downloaded model needs its engine
         expected = (self.base or gpu.service_known(self.cfg.llama_service) or time.time() - _last_seen["t"] < 3600)
         limit = timeout if expected else min(timeout, 6)
         t0, started = time.time(), False

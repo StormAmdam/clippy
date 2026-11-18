@@ -153,3 +153,42 @@ def test_a_job_without_video_tools_says_how_to_get_them(monkeypatch, tmp_output)
     monkeypatch.setattr(download.shutil, "which", lambda t: None)
     with pytest.raises(RuntimeError, match="video tools .*ffmpeg.* aren't set up yet"):
         pipeline.run("https://youtu.be/dQw4w9WgXcQ", {})
+
+
+def test_yt_dlp_runs_as_a_module_of_clippys_own_python(monkeypatch, tmp_path):
+    # pip's yt-dlp.exe remembers the build machine's Python path, so the Windows app can't use it
+    from clippy import download
+    pyw = tmp_path / "python" / "pythonw.exe"
+    pyw.parent.mkdir()
+    pyw.write_bytes(b"")
+    (tmp_path / "python" / "python.exe").write_bytes(b"")
+    monkeypatch.setattr(download.sys, "executable", str(pyw))
+    assert download.ytdlp() == [str(tmp_path / "python" / "python.exe"), "-m", "yt_dlp"]   # console: no windows
+    monkeypatch.setattr(download.importlib.util, "find_spec", lambda name: None)
+    assert download.ytdlp() == ["yt-dlp"]                          # not in Clippy's Python: the one on the PC
+
+
+def test_a_silent_yt_dlp_failure_still_says_something():
+    import subprocess
+
+    from clippy import download
+    assert "code 1" in download._why(subprocess.CompletedProcess([], 1, "", ""))
+    assert download._why(subprocess.CompletedProcess([], 1, "", "x\nERROR: Video unavailable\n")) == "ERROR: Video unavailable"
+
+
+def test_the_youtube_downloader_updates_itself_every_few_days(monkeypatch, tmp_path):
+    from clippy import components
+    stamp = tmp_path / "data" / "yt-dlp-updated.txt"
+    monkeypatch.setattr(components, "YTDLP_STAMP", stamp)
+    calls = []
+    monkeypatch.setattr(components, "_pip", lambda *a: calls.append(a))
+    assert components.update_ytdlp(log=lambda m: None)              # never updated: now
+    assert calls == [("install", "--upgrade", "--no-warn-script-location", "yt-dlp[default]")] and stamp.exists()
+    assert not components.update_ytdlp(log=lambda m: None)          # just did: not again for a few days
+    os.utime(stamp, (time.time() - 4 * 86400,) * 2)
+    def offline(*a):
+        raise RuntimeError("no internet")
+    monkeypatch.setattr(components, "_pip", offline)
+    said = []
+    assert not components.update_ytdlp(log=said.append)             # no internet: tries again next time
+    assert "tries again" in said[0]

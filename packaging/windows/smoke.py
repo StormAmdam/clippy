@@ -68,6 +68,29 @@ def ffprobe(path: Path) -> dict:
                            "stream=codec_type,codec_name,width,height:format=duration", "-of", "json", str(path)]).stdout)
 
 
+def test_youtube_tool() -> None:
+    step("0. The YouTube downloader runs from wherever the app is")
+    from clippy import download
+    cmd = download.ytdlp()
+    ver = run([*cmd, "--version"], timeout=120).stdout.strip()
+    # --verbose without a link prints yt-dlp's set-up, then complains about the missing link
+    r = subprocess.run([*cmd, "--verbose"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=120)
+    runtimes = next((ln for ln in (r.stdout + r.stderr).splitlines() if "JS runtimes" in ln), "")
+    if "deno" not in runtimes:
+        raise RuntimeError(f"yt-dlp doesn't see deno, which YouTube needs: {runtimes or (r.stdout + r.stderr)[-800:]}")
+    ok("yt-dlp starts with the app's own Python", f"{ver}, {runtimes.split(']')[-1].strip()}")
+    from clippy import components
+    if not components.update_ytdlp(max_age_days=0, log=lambda m: print("  " + m)):
+        raise RuntimeError("yt-dlp couldn't update itself")
+    ok("yt-dlp can update itself", run([*cmd, "--version"], timeout=120).stdout.strip())
+    try:                                    # GitHub's machines are often blocked by YouTube: for the record only
+        info = download.probe("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+        print(f"  (YouTube answered: “{info['title']}”, {info['duration']:.0f} s)")
+    except Exception as e:
+        print(f"  (YouTube didn't answer this machine, which is common for GitHub's: {str(e)[:200]})")
+
+
 def make_video(folder: Path) -> Path:
     step("1. Speech and a video to clip")
     wav = folder / "speech.wav"
@@ -205,6 +228,7 @@ def main() -> int:
     import clippy
     assert Path(clippy.__file__).resolve().parent == app / "clippy", clippy.__file__
     print(f"App folder: {app}")
+    test_youtube_tool()
     video = make_video(app.parent)
     test_transcription(app, video)
     test_clip(app, a.api, video, a.out)

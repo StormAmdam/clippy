@@ -1,12 +1,33 @@
 """Fetch a video with yt-dlp (or accept a local file)."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+
+def ytdlp() -> list[str]:
+    """How to start yt-dlp: as a module of Clippy's own Python when it's installed there. The yt-dlp.exe that pip makes
+    on Windows remembers the full path of the Python it was installed with (the PC the app was built on), so it
+    can't run anywhere else."""
+    if importlib.util.find_spec("yt_dlp") is None:
+        return ["yt-dlp"]
+    py = Path(sys.executable)
+    if py.name.lower() == "pythonw.exe" and py.with_name("python.exe").exists():
+        py = py.with_name("python.exe")    # a console program, so the ffmpeg it starts gets no window either
+    return [str(py), "-m", "yt_dlp"]
+
+
+def _why(r: subprocess.CompletedProcess) -> str:
+    """The last line yt-dlp printed about its failure, or what little there is to go on."""
+    for text in (r.stderr, r.stdout):
+        if text and text.strip():
+            return text.strip().splitlines()[-1]
+    return f"it stopped with code {r.returncode} without saying why"
 
 
 def _slug(text: str) -> str:
@@ -22,11 +43,10 @@ def probe(url: str) -> dict:
                              capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
         return {"id": "local-" + _slug(p.stem), "title": p.stem, "duration": float(dur or 0),
                 "uploader": "", "local_path": str(p.resolve()), "webpage_url": str(p.resolve())}
-    r = subprocess.run(["yt-dlp", "-J", "--no-playlist", "--no-warnings", url],
+    r = subprocess.run([*ytdlp(), "-J", "--no-playlist", "--no-warnings", url],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
     if r.returncode != 0:
-        msg = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "unknown error"
-        raise RuntimeError(f"yt-dlp could not read that link: {msg}")
+        raise RuntimeError(f"yt-dlp could not read that link: {_why(r)}")
     info = json.loads(r.stdout)
     return {"id": _slug(info.get("id", "video")), "title": info.get("title", ""),
             "duration": float(info.get("duration") or 0), "uploader": info.get("uploader") or info.get("channel") or "",
@@ -68,7 +88,7 @@ def download(url: str, info: dict, workdir: Path, max_height: int, progress=lamb
         return existing[0]
     h = int(max_height)
     cmd = [
-        "yt-dlp", "--no-playlist", "--no-warnings", "--newline",
+        *ytdlp(), "--no-playlist", "--no-warnings", "--newline",
         "-f", f"bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b",
         "-S", "res,fps,vcodec:avc1",  # prefer highest res/fps, then h264 when equal (fastest to decode)
         "--merge-output-format", "mp4", "--remux-video", "mp4",
@@ -129,7 +149,10 @@ def video_stream_info(path: Path) -> dict:
 
 
 def have_tools() -> list[str]:
-    return [t for t in ("ffmpeg", "ffprobe", "yt-dlp") if not shutil.which(t)]
+    missing = [t for t in ("ffmpeg", "ffprobe") if not shutil.which(t)]
+    if importlib.util.find_spec("yt_dlp") is None and not shutil.which("yt-dlp"):
+        missing.append("yt-dlp")
+    return missing
 
 
 SETUP_HINT = "Open Clippy, go to AI & Tools and press Set Up Everything."
