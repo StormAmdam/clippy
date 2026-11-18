@@ -1,5 +1,4 @@
 """clippy uninstall (Linux): removes what Clippy and its setup put on the PC, keeps the shorts, asks about the rest."""
-import shutil
 import subprocess
 import sys
 
@@ -7,7 +6,7 @@ import pytest
 
 from clippy import autostart, desktop, uninstall
 
-REAL_WHICH = shutil.which
+LINUX = pytest.mark.skipif(sys.platform == "win32", reason="clippy uninstall is for Linux; Windows has the app's uninstaller")
 
 
 class Runner:
@@ -73,6 +72,7 @@ def pc(tmp_path, monkeypatch):
     return {"home": home, "app": app, "ai": ai, "run": run, "tools": tools}
 
 
+@LINUX
 def test_uninstall_removes_clippy_and_keeps_the_shorts(pc):
     said = []
     assert uninstall.main(["--yes"], say=said.append) == 0
@@ -88,6 +88,7 @@ def test_uninstall_removes_clippy_and_keeps_the_shorts(pc):
     assert "python3" not in text and "bad;name" not in text           # never offered
 
 
+@LINUX
 def test_all_removes_what_setup_installed_and_nothing_else(pc):
     assert uninstall.main(["--all"], say=lambda m: None) == 0
     home = pc["home"]
@@ -98,6 +99,7 @@ def test_all_removes_what_setup_installed_and_nothing_else(pc):
     assert ["systemctl", "--user", "disable", "--now", "llama-coder"] in pc["run"].calls
 
 
+@LINUX
 def test_ollama_goes_only_if_setup_installed_it(pc):
     pc["tools"].add("ollama")
     (pc["home"] / ".ollama/models").mkdir(parents=True)
@@ -107,6 +109,7 @@ def test_ollama_goes_only_if_setup_installed_it(pc):
     assert (pc["home"] / ".ollama/models").exists() and "before Clippy" in "\n".join(said)
 
 
+@LINUX
 def test_ollama_setup_installed_is_removed_with_its_own_steps(pc):
     pc["tools"].add("ollama")
     (pc["app"] / "data/setup-installed.txt").write_text("ollama\n")
@@ -117,6 +120,7 @@ def test_ollama_setup_installed_is_removed_with_its_own_steps(pc):
     assert "userdel ollama" in script and not (pc["home"] / ".ollama").exists()
 
 
+@LINUX
 def test_the_model_setup_pulled_into_your_own_ollama(pc):
     pc["tools"].add("ollama")
     (pc["app"] / "data/setup-installed.txt").write_text("ollama-model qwen3.5:9b\nollama-model gone:1b\n")
@@ -126,6 +130,7 @@ def test_the_model_setup_pulled_into_your_own_ollama(pc):
     assert not any(c[0] == "sh" for c in pc["run"].sudo())            # Ollama itself stays
 
 
+@LINUX
 def test_answers_are_followed(pc):
     answers = {"Keep your videos": False, "AI for Clippy": True, "system packages": False, "Remove Clippy now": True}
     pick = lambda q, d: next(v for k, v in answers.items() if k in q)
@@ -134,17 +139,20 @@ def test_answers_are_followed(pc):
     assert not any(p.exists() for p in pc["ai"]) and pc["run"].sudo() == []
 
 
+@LINUX
 def test_saying_no_removes_nothing(pc):
     assert uninstall.main([], answers=lambda q, d: False if "now" in q else d, say=lambda m: None) == 1
     assert pc["app"].exists() and (pc["home"] / ".local/bin/clippy").is_symlink()
 
 
+@LINUX
 def test_unsaved_work_is_never_removed_without_asking(pc, monkeypatch):
     monkeypatch.setattr(uninstall, "unsaved_work", lambda: "This folder has changes")
     assert uninstall.main(["--yes"], say=lambda m: None) == 1
     assert pc["app"].exists()
 
 
+@LINUX
 def test_another_folders_clippy_command_is_left_alone(pc, tmp_path):
     link = pc["home"] / ".local/bin/clippy"
     link.unlink()
