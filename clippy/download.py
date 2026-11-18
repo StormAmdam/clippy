@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -18,11 +19,11 @@ def probe(url: str) -> dict:
     p = Path(url).expanduser()
     if p.exists():
         dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)],
-                             capture_output=True, text=True).stdout.strip()
+                             capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
         return {"id": "local-" + _slug(p.stem), "title": p.stem, "duration": float(dur or 0),
                 "uploader": "", "local_path": str(p.resolve()), "webpage_url": str(p.resolve())}
     r = subprocess.run(["yt-dlp", "-J", "--no-playlist", "--no-warnings", url],
-                       capture_output=True, text=True, timeout=180)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
     if r.returncode != 0:
         msg = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "unknown error"
         raise RuntimeError(f"yt-dlp could not read that link: {msg}")
@@ -48,7 +49,7 @@ def cached_info(url: str, out_root: Path) -> dict | None:
         return None
     d = Path(out_root) / _slug(m.group(1))
     try:
-        info = json.loads((d / "info.json").read_text())
+        info = json.loads((d / "info.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(info, dict) or info.get("id") != d.name:
@@ -74,7 +75,8 @@ def download(url: str, info: dict, workdir: Path, max_height: int, progress=lamb
         "--progress-template", "download:PROG %(progress._percent_str)s",
         "-o", str(workdir / "source.%(ext)s"), url,
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                            errors="replace")
     part, last = 0, 0.0
     tail: list[str] = []
     assert proc.stdout
@@ -102,7 +104,7 @@ def video_stream_info(path: Path) -> dict:
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                         "stream=width,height,r_frame_rate,avg_frame_rate:stream_side_data=rotation",
                         "-show_entries", "format=duration", "-of", "json", str(path)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
     data = json.loads(r.stdout or "{}")
     st = (data.get("streams") or [{}])[0]
 
@@ -120,7 +122,7 @@ def video_stream_info(path: Path) -> dict:
         fps_str, fps = "60/1", 60.0
     has_audio = bool(json.loads(subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "json", str(path)],
-        capture_output=True, text=True).stdout or "{}").get("streams"))
+        capture_output=True, text=True, encoding="utf-8", errors="replace").stdout or "{}").get("streams"))
     return {"width": int(st.get("width", 0)), "height": int(st.get("height", 0)),
             "fps": fps, "fps_str": fps_str, "duration": float(data.get("format", {}).get("duration", 0) or 0),
             "has_audio": has_audio}
@@ -130,8 +132,14 @@ def have_tools() -> list[str]:
     return [t for t in ("ffmpeg", "ffprobe", "yt-dlp") if not shutil.which(t)]
 
 
-def install_hint() -> str:
-    """How to get ffmpeg/yt-dlp on this PC's Linux distro (setup.sh puts a current yt-dlp in .venv)."""
+SETUP_HINT = "Open Clippy, go to AI & Tools and press Set Up Everything."
+
+
+def install_hint(windows: bool | None = None) -> str:
+    """How to get ffmpeg/yt-dlp: in the Windows app Clippy downloads them itself; on Linux, the distro's package
+    manager (setup.sh puts a current yt-dlp in .venv)."""
+    if windows if windows is not None else sys.platform == "win32":
+        return SETUP_HINT
     if shutil.which("pacman"):
         return "sudo pacman -S ffmpeg yt-dlp"
     for pm, cmd in (("apt-get", "sudo apt-get install ffmpeg"), ("dnf", "sudo dnf install ffmpeg"),

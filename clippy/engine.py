@@ -154,18 +154,26 @@ class Engine:
             port = _free_port()
             log_dir = config.ROOT / "data"
             log_dir.mkdir(exist_ok=True)
-            log = open(log_dir / "engine.log", "ab")
-            args = [str(exe), "-m", str(model), "--alias", model.stem, "--host", "127.0.0.1", "--port", str(port),
+            log_file = log_dir / "engine.log"
+            try:
+                if log_file.stat().st_size > 5_000_000:
+                    log_file.replace(log_dir / "engine.old.log")   # keep the log from growing forever
+            except OSError:                                         # none yet, or still open somewhere
+                pass
+            # the model by its name, from its own folder: Clippy's folder may have letters like ö or 测 in its path
+            args = [str(exe), "-m", model.name, "--alias", model.stem, "--host", "127.0.0.1", "--port", str(port),
                     "-c", str(cfg.ai_context or CONTEXT), "--parallel", "1", "--threads", str(hw["threads"]),
                     "--fit", "on", "--fit-target", "4500" if hw["vram_mb"] >= 10 * 1024 else "1024"]
+            # Windows: tied to Clippy (clippy/quiet.py), so it ends when Clippy does, even if Clippy crashes
             extra = {"start_new_session": True} if sys.platform != "win32" else components.hidden()
-            self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                         cwd=exe.parent, **extra)
+            with open(log_file, "ab") as log:
+                self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                             cwd=model.parent, **extra)
             self.model, self.port = model, port
             t0 = time.time()
             while time.time() - t0 < 600:               # a big model can take a while to load from disk
                 if self.proc.poll() is not None:
-                    tail = (log_dir / "engine.log").read_bytes()[-600:].decode(errors="replace")
+                    tail = log_file.read_bytes()[-600:].decode(errors="replace")
                     self.proc = None
                     raise RuntimeError(f"The AI engine stopped while loading {model.stem}. Last lines of its log:\n{tail}")
                 try:

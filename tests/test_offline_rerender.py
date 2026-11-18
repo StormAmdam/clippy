@@ -9,6 +9,12 @@ class _Reached(Exception):
     pass
 
 
+@pytest.fixture(autouse=True)
+def _tools_present(monkeypatch):
+    from clippy import pipeline
+    monkeypatch.setattr(pipeline, "have_tools", lambda: [])     # these tests are about YouTube, not ffmpeg/yt-dlp
+
+
 def _downloaded(out, vid="tzGLLFFhqeU", source="source.mp4"):
     d = out / vid
     d.mkdir(parents=True)

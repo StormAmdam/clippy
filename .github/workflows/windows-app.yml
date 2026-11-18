@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write      # attach the installer and zip to the release for version tags
-    timeout-minutes: 75
+    timeout-minutes: 100
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CLIPPY_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.1.0-dev.{0}', github.run_number) }}
@@ -29,6 +29,18 @@ jobs:
       - name: Install, open and uninstall it like a user would
         shell: pwsh
         run: |
+          function Wait-Clippy($dir, $seconds = 180) {
+            foreach ($i in 1..($seconds / 2)) {
+              $port = Get-Content "$dir\data\port.txt" -ErrorAction SilentlyContinue
+              if ($port) { try { $s = Invoke-RestMethod "http://127.0.0.1:$port/api/status" -TimeoutSec 2; if ($s.folder -eq $dir) { return [int]$port } } catch {} }
+              Start-Sleep 2
+            }
+            Get-Content "$dir\data\clippy.log" -ErrorAction SilentlyContinue
+            throw "Clippy didn't start from $dir"
+          }
+          function Clippy-Processes($dir) {
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$dir*" -and $_.Name -notlike "unins*" }
+          }
           $setup = (Get-ChildItem dist\Clippy-Setup-*.exe).FullName
           Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
           $dir = "$env:LOCALAPPDATA\Programs\Clippy"
@@ -37,22 +49,125 @@ jobs:
           $busy = $true
           try { Invoke-RestMethod http://127.0.0.1:7860/api/status -TimeoutSec 2 | Out-Null } catch { $busy = $false }
           if ($busy) { throw "Something from the build is still running on port 7860" }
-          Start-Process "$dir\Clippy.exe"
-          $ok = $false
-          foreach ($i in 1..90) { try { Invoke-RestMethod http://127.0.0.1:7860/api/status | Out-Null; $ok = $true; break } catch { Start-Sleep 2 } }
-          if (-not $ok) { Get-Content "$dir\data\clippy.log" -ErrorAction SilentlyContinue; throw "Clippy.exe didn't start the app" }
-          $s = Invoke-RestMethod http://127.0.0.1:7860/api/setup
-          "Clippy.exe started the app; its folder: $($s.folder); still needs: $($s.missing -join ', ')"
-          if ($s.folder -ne $dir) { throw "The app isn't using its own folder" }
-          Start-Sleep 5
-          if (Test-Path "$dir\data\window") { "App window profile lives inside the app folder: $dir\data\window" }
-          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$dir*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+          "--- Another program already uses port 7860: Clippy must pick another one"
+          $other = Start-Process python -ArgumentList "-m", "http.server", "7860", "--bind", "127.0.0.1" -PassThru -WindowStyle Hidden
           Start-Sleep 3
+          Start-Process "$dir\Clippy.exe"
+          $port = Wait-Clippy $dir
+          if ($port -eq 7860) { throw "Clippy says it runs on 7860, which another program has" }
+          $s = Invoke-RestMethod "http://127.0.0.1:$port/api/setup"
+          "Clippy.exe started the app on port $port; its folder: $($s.folder); still needs: $($s.missing -join ', ')"
+          if ($s.folder -ne $dir) { throw "The app isn't using its own folder" }
+
+          "--- Starting Clippy.exe again only opens the window"
+          Start-Process "$dir\Clippy.exe"
+          Start-Sleep 15
+          $servers = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq "$dir\python\pythonw.exe" })
+          if ($servers.Count -ne 1) { $servers | Format-Table ProcessId, CommandLine; throw "Expected one Clippy, found $($servers.Count)" }
+          if (Test-Path "$dir\data\window") { "App window profile lives inside the app folder: $dir\data\window" }
+
+          "--- Start at login"
+          $auto = Invoke-RestMethod -Method Post "http://127.0.0.1:$port/api/autostart" -ContentType "application/json" -Body '{"enabled": true}'
+          if (-not $auto.enabled) { throw "Start at login didn't turn on: $($auto | ConvertTo-Json -Compress)" }
+          $run = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run").Clippy
+          if ($run -ne "`"$dir\Clippy.exe`" --background") { throw "Unexpected Run entry: $run" }
+          "Run entry: $run"
+          Clippy-Processes $dir | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          Stop-Process -Id $other.Id -Force
+          Start-Sleep 3
+          Start-Process "$dir\Clippy.exe" -ArgumentList "--background"      # what Windows runs at login
+          $port = Wait-Clippy $dir
+          Start-Sleep 5
+          if (Get-CimInstance Win32_Process | Where-Object { $_.Name -eq "msedge.exe" -and $_.CommandLine -like "*$dir*" }) { throw "--background opened a window" }
+          "Started in the background on port $port, no window"
+
+          "--- Notifications"
+          Push-Location $dir
+          & "$dir\python\python.exe" -X utf8 -c "from clippy import notify; app = notify.windows_app_id(); r = notify.windows_toast('Clippy', '3 new shorts are waiting for your review', app); print('app id:', app, '| exit code:', r.returncode, r.stderr.strip()[:300]); raise SystemExit(r.returncode)"
+          if ($LASTEXITCODE) { throw "The notification failed" }
+          Pop-Location
+
+          "--- Uninstall while Clippy runs in the background"
           Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
           foreach ($i in 1..20) { if (-not (Test-Path $dir)) { break }; Start-Sleep 1 }
           if (Test-Path $dir) { Get-ChildItem -Recurse $dir | Select-Object -First 20 FullName; throw "Uninstalling left files behind" }
           if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clippy.lnk") { throw "Uninstalling left the Start menu shortcut" }
+          if ((Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run").Clippy) { throw "Uninstalling left the Start at login entry" }
+          if (Clippy-Processes $dir) { throw "Clippy is still running after uninstalling" }
           "Installed, opened and uninstalled: nothing left behind"
+      - name: Update over the previous release, in a folder with non-English letters
+        shell: pwsh
+        run: |
+          $prev = gh release list --repo $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases --limit 5 --json tagName --jq '.[].tagName' |
+                  Where-Object { $_ -ne $env:GITHUB_REF_NAME } | Select-Object -First 1
+          if (-not $prev) { "No earlier release to update from"; exit 0 }
+          gh release download $prev --repo $env:GITHUB_REPOSITORY --pattern "Clippy-Setup-*.exe" --dir prev
+          $old = (Get-ChildItem prev\Clippy-Setup-*.exe).FullName
+          $dir = Join-Path $env:LOCALAPPDATA ("Programs\Clippy J" + [char]0x00F6 + "rg " + [char]0x6D4B + [char]0x8BD5)
+          "Installing $prev into $dir"
+          Start-Process $old -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`"" -Wait
+          if (-not (Test-Path "$dir\Clippy.exe")) { throw "$prev didn't install into $dir" }
+
+          # what a person has after using Clippy for a while: downloaded tools and models, settings, shorts
+          $mine = @{
+            "settings.json" = '{"clips": 7, "caption_style": "box", "whisper_model": "medium"}'
+            "models\llm\My-Own-Model.gguf" = "model " * 1000
+            "models\whisper\models--Systran--faster-whisper-medium\snapshots\abc\model.bin" = "whisper " * 1000
+            "bin\ffmpeg.exe" = "ffmpeg"
+            "engine\current.txt" = "b1-cpu"
+            "engine\b1-cpu\llama-server.exe" = "engine"
+            "fonts\NotoColorEmoji.ttf" = "emoji font"
+            "output\local-jorg\clips\01-the-hook.mp4" = "video " * 1000
+            "output\local-jorg\result.json" = '{"id": "local-jorg", "title": "J\u00f6rg\u2019s caf\u00e9 \ud83c\udfac", "created": 1, "clips": [{"file": "local-jorg/clips/01-the-hook.mp4", "title": "The hook"}]}'
+            "output\_auto\review.json" = '[]'
+          }
+          foreach ($f in $mine.Keys) { $p = Join-Path $dir $f; New-Item -ItemType Directory -Force (Split-Path $p) | Out-Null; Set-Content -LiteralPath $p $mine[$f] -NoNewline }
+          $before = @{}; foreach ($f in $mine.Keys) { $before[$f] = (Get-FileHash -LiteralPath (Join-Path $dir $f)).Hash }
+
+          Start-Process "$dir\Clippy.exe"            # updating while the old Clippy is open
+          $up = $false
+          foreach ($i in 1..45) { try { Invoke-RestMethod http://127.0.0.1:7860/api/status -TimeoutSec 2 | Out-Null; $up = $true; break } catch { Start-Sleep 2 } }
+          "The old Clippy is running: $up"
+
+          $new = (Get-ChildItem dist\Clippy-Setup-*.exe).FullName
+          Start-Process $new -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait     # no /DIR: it must find the old folder
+          if (-not (Test-Path "$dir\clippy\notify.py")) { throw "The update didn't replace Clippy's files in $dir" }
+          foreach ($f in $mine.Keys) {
+            $p = Join-Path $dir $f
+            if (-not (Test-Path -LiteralPath $p)) { throw "The update deleted $f" }
+            if ((Get-FileHash -LiteralPath $p).Hash -ne $before[$f]) { throw "The update changed $f" }
+          }
+          "All downloads, settings and shorts survived the update"
+
+          Start-Process "$dir\Clippy.exe"
+          $port = $null
+          foreach ($i in 1..90) {
+            $port = Get-Content "$dir\data\port.txt" -ErrorAction SilentlyContinue
+            if ($port) { try { if ((Invoke-RestMethod "http://127.0.0.1:$port/api/status" -TimeoutSec 2).folder -eq $dir) { break } } catch {} }
+            $port = $null; Start-Sleep 2
+          }
+          if (-not $port) { Get-Content "$dir\data\clippy.log" -ErrorAction SilentlyContinue; throw "The updated Clippy didn't start from $dir" }
+          $settings = Invoke-RestMethod "http://127.0.0.1:$port/api/settings"
+          if ($settings.clips -ne 7 -or $settings.caption_style -ne "box") { throw "The updated Clippy lost the settings" }
+          $lib = Invoke-RestMethod "http://127.0.0.1:$port/api/library"
+          if (-not ($lib | Where-Object { $_.id -eq "local-jorg" })) { throw "The updated Clippy doesn't show the earlier shorts" }
+          $models = (Invoke-RestMethod "http://127.0.0.1:$port/api/setup").models
+          if (-not ($models | Where-Object { $_.file -eq "My-Own-Model.gguf" -and $_.installed })) { throw "The updated Clippy doesn't see the downloaded model" }
+          "The updated Clippy runs from $dir with the earlier settings, shorts and model"
+
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          foreach ($i in 1..20) { if (-not (Test-Path $dir)) { break }; Start-Sleep 1 }
+          if (Test-Path $dir) { Get-ChildItem -Recurse $dir | Select-Object -First 20 FullName; throw "Uninstalling left files behind" }
+          "Updated and uninstalled: nothing left behind"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-clip-${{ env.CLIPPY_VERSION }}
+          path: |
+            dist/smoke/
+            dist/server.log*
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: Clippy-windows-${{ env.CLIPPY_VERSION }}

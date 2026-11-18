@@ -93,12 +93,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _auto(argv: list[str]) -> int:
-    """./clippy.sh auto [profile name | all]  — scrape, pick and render shorts into the review queue."""
+    """clippy auto [profile name | all]  — scrape, pick and render shorts into the review queue."""
     from . import autopilot
     from .pipeline import run
     profiles = autopilot.list_profiles()
     if not profiles:
-        print("No profiles yet — create one in the web app (./clippy.sh web → Autopilot).")
+        print("No Autopilot channels yet: create one on the Autopilot page in the app.")
         return 1
     want = " ".join(argv).strip().lower()
     chosen = profiles if want in ("", "all") else [p for p in profiles if p["name"].lower() == want or p["id"] == want]

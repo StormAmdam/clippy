@@ -75,7 +75,7 @@ def search_url(query: str, **kw) -> str:
 
 def _flat(url: str, limit: int) -> list[dict]:
     r = subprocess.run(["yt-dlp", "--flat-playlist", "-J", "--no-warnings", "--playlist-end", str(limit), url],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     if r.returncode != 0 or not r.stdout.strip():
         return []
     try:
@@ -89,7 +89,7 @@ def _enrich(ids: list[str]) -> list[dict]:
         return []
     r = subprocess.run(["yt-dlp", "--skip-download", "--no-warnings", "--ignore-errors", "--no-playlist",
                         "--print", "%(.{" + FIELDS + "})j"] + [f"https://www.youtube.com/watch?v={i}" for i in ids],
-                       capture_output=True, text=True, timeout=60 + 20 * len(ids))
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60 + 20 * len(ids))
     out = []
     for line in r.stdout.splitlines():
         try:
@@ -104,7 +104,7 @@ def _channel_subs(cids: list[str]) -> dict[str, int]:
     watch page ("21.5M" → 215), which would fake huge breakout scores — the channel page is reliable."""
     f = finder_dir() / "channels.json"
     try:
-        cache = json.loads(f.read_text())
+        cache = json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         cache = {}
     now = time.time()
@@ -113,7 +113,8 @@ def _channel_subs(cids: list[str]) -> dict[str, int]:
     def one(cid):
         try:
             r = subprocess.run(["yt-dlp", "--flat-playlist", "--no-warnings", "--playlist-end", "1", "-J",
-                                f"https://www.youtube.com/channel/{cid}"], capture_output=True, text=True, timeout=60)
+                                f"https://www.youtube.com/channel/{cid}"], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=60)
             subs = json.loads(r.stdout).get("channel_follower_count") if r.returncode == 0 else None
         except Exception:
             subs = None
@@ -125,7 +126,7 @@ def _channel_subs(cids: list[str]) -> dict[str, int]:
                 if subs:
                     cache[cid] = {"subs": int(subs), "t": now}
         try:
-            f.write_text(json.dumps(cache))
+            config.write_atomic(f, json.dumps(cache))
         except Exception:
             pass
     return {c: cache[c]["subs"] for c in cids if c in cache}
@@ -287,7 +288,7 @@ def _stats(rows: list[dict]) -> dict:
 def load_watchlist() -> list[str]:
     f = finder_dir() / "watchlist.json"
     try:
-        return json.loads(f.read_text())
+        return json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         return []
 
@@ -302,7 +303,7 @@ def save_watchlist(items: list[str]) -> list[str]:
             x = "https://www.youtube.com/" + x
         if x not in clean:
             clean.append(x)
-    (finder_dir() / "watchlist.json").write_text(json.dumps(clean, indent=2))
+    config.write_atomic(finder_dir() / "watchlist.json", json.dumps(clean, ensure_ascii=False, indent=2))
     return clean
 
 
@@ -401,8 +402,8 @@ def scan(niches: list[str], keywords: str = "", window: str = "week", duration: 
               "stats": _stats(rows), "videos": rows}
     if save_latest:
         d = finder_dir()
-        (d / "latest.json").write_text(json.dumps(result, ensure_ascii=False))
-        (d / f"scan-{result['created']}.json").write_text(json.dumps(result, ensure_ascii=False))
+        config.write_atomic(d / "latest.json", json.dumps(result, ensure_ascii=False))
+        (d / f"scan-{result['created']}.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     progress(1.0, f"Ranked {len(rows)} videos")
     return result
 
@@ -411,7 +412,7 @@ def latest() -> dict | None:
     f = finder_dir() / "latest.json"
     if not f.exists():
         return None
-    data = json.loads(f.read_text())
+    data = json.loads(f.read_text(encoding="utf-8"))
     lib = config.output_root(config.load())
     for r in data.get("videos", []):
         r["clipped"] = (lib / r["id"] / "result.json").exists()

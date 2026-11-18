@@ -12,6 +12,7 @@ import os
 import re
 import socket
 import struct
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,9 @@ CONTEXT_ERROR = re.compile(r"context|too long|exceed|n_ctx|maximum.{0,20}length|
 NO_SERVER_HELP = ("No local AI server found. Clippy looked for llama.cpp, Ollama, LM Studio, Jan, KoboldCpp and vLLM "
                   "on their usual ports{where}. Start one (for example `ollama serve`, then `ollama pull qwen3.5:9b`), "
                   "run `bash setup.sh` to set one up, or enter its address under Settings → AI.")
+NO_AI_HELP_WINDOWS = ("Clippy has no AI to pick clips with yet. Open AI & Tools and press Set Up Everything to download "
+                      "one, or start Ollama or LM Studio (Clippy finds them by itself), or enter an AI's address under "
+                      "Settings → AI.")
 
 
 class ContextTooSmall(RuntimeError):
@@ -201,6 +205,8 @@ def resolve(cfg: Settings, max_age: float = 20, start: bool = False) -> Server:
     if url.lower() == "auto":
         found = detect()
         if not found:
+            if sys.platform == "win32":
+                raise RuntimeError(NO_AI_HELP_WINDOWS)
             raise RuntimeError(NO_SERVER_HELP.format(where=" here and on Windows" if wsl() else ""))
         server = found[0]
     else:

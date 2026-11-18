@@ -212,7 +212,7 @@ def engine_exe() -> Path | None:
     cur = ENGINE_DIR / "current.txt"                   # a text file, not a symlink: Windows needs admin for those
     if not cur.exists():
         return None
-    exe = ENGINE_DIR / cur.read_text().strip() / f"llama-server{EXE}"
+    exe = ENGINE_DIR / cur.read_text(encoding="utf-8").strip() / f"llama-server{EXE}"
     return exe if exe.exists() else None
 
 
@@ -248,11 +248,12 @@ def _engine_install(task: Task, cfg, hw: dict | None = None) -> None:
         raise RuntimeError("The AI engine download didn't contain llama-server.")
     if not WIN:
         exe.chmod(0o755)
-    out = subprocess.run([str(exe), "--list-devices"], capture_output=True, text=True, timeout=120, cwd=target, **hidden())
+    out = subprocess.run([str(exe), "--list-devices"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         timeout=120, cwd=target, **hidden())
     if variant == "cuda" and "CUDA0" not in out.stdout + out.stderr:
         task.step = "Your graphics driver is too old for the GPU build; getting the processor build…"
         return _engine_install(task, cfg, {**hw, "nvidia": False, "vulkan": False})
-    (ENGINE_DIR / "current.txt").write_text(target.name)
+    (ENGINE_DIR / "current.txt").write_text(target.name, encoding="utf-8")
     for old in ENGINE_DIR.iterdir():                   # keep only the build in use
         if old.is_dir() and old != target and old.name != "downloads":
             shutil.rmtree(old, ignore_errors=True)
@@ -279,7 +280,7 @@ def _gpu_status(cfg) -> dict:
 
 def _pip(*args: str) -> None:
     r = subprocess.run([sys.executable, "-m", "pip", "--disable-pip-version-check", "--no-input", *args],
-                       capture_output=True, text=True, **hidden())
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", **hidden())
     if r.returncode:
         raise RuntimeError((r.stderr or r.stdout).strip()[-400:])
 

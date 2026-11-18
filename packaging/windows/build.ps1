@@ -1,8 +1,9 @@
 # Builds the Windows app: dist\Clippy (portable folder), dist\Clippy-portable-<version>-win64.zip and
 # dist\Clippy-Setup-<version>-win64.exe. Needs uv, the MSVC tools (cl, rc) and Inno Setup 6 (iscc).
 #   ./packaging/windows/build.ps1               build
-#   ./packaging/windows/build.ps1 -SmokeTest    also start the built app, download parts through it, test the
-#                                               built-in AI and run the test suite with the bundled Python
+#   ./packaging/windows/build.ps1 -SmokeTest    also test the built app from a folder with a name like C:\Users\Jörg:
+#                                               download parts through it, ask the built-in AI, transcribe speech,
+#                                               make a real clip (smoke.py) and run the test suite with its Python
 param([switch]$SmokeTest)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -62,10 +63,18 @@ Remove-Item launcher.obj, launcher.res -ErrorAction SilentlyContinue
 Pop-Location
 
 if ($SmokeTest) {
-  Step "Smoke test: start the built app"
-  $env:PATH = (Join-Path $App "bin") + ";" + $env:PATH
+  # Run it all from a folder named like a non-English Windows user's (C:\Users\Jörg 测试\…), space included: the AI
+  # engine, ffmpeg, Whisper and the face finder must all cope with paths like that.
+  $Test = Join-Path $Out ("J" + [char]0x00F6 + "rg " + [char]0x6D4B + [char]0x8BD5)
+  New-Item -ItemType Directory -Force $Test | Out-Null
+  $TestApp = Join-Path $Test "Clippy"
+  Move-Item $App $TestApp
+  $TPy = Join-Path $TestApp "python\python.exe"
+
+  Step "Smoke test: start the built app (in $TestApp)"
+  $env:PATH = (Join-Path $TestApp "bin") + ";" + $env:PATH
   $log = Join-Path $Out "server.log"
-  $srv = Start-Process $Py -ArgumentList "-m", "clippy", "web", "--no-browser", "--port", "7860" -WorkingDirectory $App `
+  $srv = Start-Process $TPy -ArgumentList "-m", "clippy", "web", "--no-browser", "--port", "7860" -WorkingDirectory $TestApp `
          -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -WindowStyle Hidden
   $api = "http://127.0.0.1:7860/api"
   $ok = $false
@@ -74,6 +83,7 @@ if ($SmokeTest) {
   $setup = Invoke-RestMethod "$api/setup"
   Write-Host ("Missing on a fresh install: " + ($setup.missing -join ", "))
   Write-Host ("Hardware: " + ($setup.hardware | ConvertTo-Json -Compress))
+  if ($setup.folder -ne $TestApp) { throw "The app reports its folder as $($setup.folder), not $TestApp" }
 
   function Install-Part($id) {
     Invoke-RestMethod -Method Post "$api/setup/install" -ContentType "application/json" -Body (@{ id = $id } | ConvertTo-Json) | Out-Null
@@ -92,29 +102,44 @@ if ($SmokeTest) {
   Install-Part "emoji"
   Install-Part "engine"
   Install-Part "model:Qwen3.5-4B-Q4_K_M"
-  Run (Join-Path $App "bin\ffmpeg.exe") -hide_banner -version
+  # the small speech model, for the transcription test (people get large-v3-turbo)
+  Invoke-RestMethod -Method Post "$api/settings" -ContentType "application/json" -Body '{"whisper_model": "tiny"}' | Out-Null
+  Install-Part "whisper"
+  Run (Join-Path $TestApp "bin\ffmpeg.exe") -hide_banner -version
   Step "Smoke test: the built-in AI answers"
-  Push-Location $App
-  $answer = & $Py -m clippy ai test 2>&1 | Out-String
+  Push-Location $TestApp
+  $answer = & $TPy -m clippy ai test 2>&1 | Out-String
   Pop-Location
   Write-Host $answer
   if ($answer -notmatch "Test answer") { throw "The built-in AI didn't answer" }
-  Stop-Process -Id $srv.Id -Force
 
-  Step "Test suite with the bundled Python"
-  Run $Py -m pip install --disable-pip-version-check --no-warn-script-location pytest
+  Step "Smoke test: speech, transcription and a real clip"
+  Run $TPy -X utf8 (Join-Path $Here "smoke.py") --app $TestApp --api "http://127.0.0.1:7860" --out (Join-Path $Out "smoke")
+
+  Step "Smoke test: ending Clippy also ends its AI engine"
+  if (-not (Get-Process llama-server -ErrorAction SilentlyContinue)) { throw "The built-in AI should still be loaded after making a clip" }
+  Stop-Process -Id $srv.Id -Force                      # like End task in Task Manager
+  $gone = $false
+  foreach ($i in 1..30) { if (-not (Get-Process llama-server -ErrorAction SilentlyContinue)) { $gone = $true; break }; Start-Sleep 1 }
+  if (-not $gone) { Get-Process llama-server | Format-Table Id, Path; throw "The AI engine kept running after Clippy was ended" }
+  Write-Host "  the AI engine ended with Clippy"
+
+  Step "Test suite with the bundled Python (temp files in the same kind of folder)"
+  Run $TPy -m pip install --disable-pip-version-check --no-warn-script-location pytest
   Push-Location $Root
-  & $Py -X utf8 -m pytest -q -p no:cacheprovider tests   # UTF-8 mode, as the app always runs
+  & $TPy -X utf8 -m pytest -q -p no:cacheprovider tests --basetemp (Join-Path $Test "pytest temp")   # UTF-8 mode, as the app always runs
   $failed = $LASTEXITCODE
   Pop-Location
-  Run $Py -m pip uninstall -y pytest pluggy iniconfig
+  Run $TPy -m pip uninstall -y pytest pluggy iniconfig
   if ($failed) { throw "Tests failed on Windows" }
 
   Step "Remove everything the smoke test downloaded"
   foreach ($d in "bin", "engine", "downloads", "data", "output", "models\llm", "models\whisper") {
-    $p = Join-Path $App $d; if (Test-Path $p) { Remove-Item -Recurse -Force $p }
+    $p = Join-Path $TestApp $d; if (Test-Path $p) { Remove-Item -Recurse -Force $p }
   }
-  foreach ($f in "settings.json", "fonts\NotoColorEmoji.ttf") { $p = Join-Path $App $f; if (Test-Path $p) { Remove-Item -Force $p } }
+  foreach ($f in "settings.json", "fonts\NotoColorEmoji.ttf") { $p = Join-Path $TestApp $f; if (Test-Path $p) { Remove-Item -Force $p } }
+  Move-Item $TestApp $App
+  Remove-Item -Recurse -Force $Test
 }
 Get-ChildItem $App -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 

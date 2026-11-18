@@ -11,10 +11,11 @@ from pathlib import Path
 import numpy as np
 
 from . import config
-from .download import cached_info, download, probe, video_stream_info
+from .download import cached_info, download, have_tools, install_hint, probe, video_stream_info
 from .highlights import has_speech, pick_visual_clips, speech_stats
 from .picker import pick_clips
 from .render import render_clip
+from .storage import FileInUse, remove_file
 from .transcribe import audio_only, transcribe
 
 STAGES = [("download", 0.10), ("transcribe", 0.25), ("pick", 0.20), ("render", 0.45)]
@@ -41,6 +42,9 @@ class Progress:
 def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, msg: None, log=print,
         on_info=None) -> dict:
     cfg = config.load(overrides)
+    local = Path(url.strip()).expanduser().exists()
+    if missing := [t for t in have_tools() if not (t == "yt-dlp" and local)]:
+        raise RuntimeError(f"Clippy's video tools ({', '.join(missing)}) aren't set up yet. {install_hint()}")
     reuse = bool((overrides or {}).get("reuse_picks"))
     pr = Progress(on_progress)
     t_start = time.time()
@@ -59,7 +63,7 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
     log(f"▶ {info['title']}  ({info['duration'] / 60:.1f} min)")
     workdir = config.output_root(cfg) / info["id"]
     workdir.mkdir(parents=True, exist_ok=True)
-    (workdir / "info.json").write_text(json.dumps(info, ensure_ascii=False, indent=2))
+    config.write_atomic(workdir / "info.json", json.dumps(info, ensure_ascii=False, indent=2))
     src = download(url.strip(), info, workdir, cfg.max_height, progress=p)
     vinfo = video_stream_info(src)
     log(f"  source {vinfo['width']}x{vinfo['height']} @ {vinfo['fps']:.2f} fps")
@@ -80,7 +84,7 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
     p = pr.stage("pick")
     picks_file = workdir / "picks.json"
     if reuse and picks_file.exists():
-        clips = json.loads(picks_file.read_text())
+        clips = json.loads(picks_file.read_text(encoding="utf-8"))
         visual = bool(clips) and all(c.get("mode") == "visual" for c in clips)
         p(1, "Reusing previous picks")
     else:
@@ -88,7 +92,7 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
             clips = pick_visual_clips(cfg, info, src, vinfo, env, progress=p, log=log)
         else:
             clips = pick_clips(cfg, info, tr, progress=p, log=log, env=env)
-        picks_file.write_text(json.dumps(clips, ensure_ascii=False, indent=2))
+        config.write_atomic(picks_file, json.dumps(clips, ensure_ascii=False, indent=2))
 
     # no talking: no captions, keep the music untouched, keep every frame, show the hook title the whole time
     rcfg = dataclasses.replace(cfg, voice_polish=False, remove_silences=False,
@@ -100,7 +104,11 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
     out_dir.mkdir(exist_ok=True)
     for old in out_dir.glob("*"):
         if old.is_file():
-            old.unlink()
+            try:
+                remove_file(old)
+            except FileInUse:
+                raise RuntimeError(f"Couldn't replace the earlier short {old.name}: it's open in another program "
+                                   "(a video player, perhaps). Close it and try again.") from None
     results = []
     for i, clip in enumerate(clips):
         name = f"{i + 1:02d}-{_slug(clip.get('title') or 'clip')}.mp4"
@@ -117,6 +125,6 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
                "mode": "visual" if visual else "speech",
                "transcribed_on": tr.get("device"), "created": int(time.time()),
                "seconds": round(time.time() - t_start), "clips": results}
-    (workdir / "result.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+    config.write_atomic(workdir / "result.json", json.dumps(summary, ensure_ascii=False, indent=2))
     on_progress("done", 1.0, f"{len(results)} clips ready")
     return summary

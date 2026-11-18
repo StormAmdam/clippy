@@ -6,8 +6,11 @@ clips*/ folders. Folders starting with "_" (autopilot data, finder data) are int
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import stat
+import sys
 import time
 from pathlib import Path
 
@@ -15,6 +18,46 @@ from .config import INTERNAL_DIRS
 
 VIDEO_EXT = {".mp4", ".mkv", ".webm", ".mov"}
 _ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class FileInUse(RuntimeError):
+    """Windows won't delete a file while another program has it open."""
+
+
+def in_use_message(path: Path, done: str = "") -> str:
+    return (f"Couldn't delete {Path(path).name}: it's open in another program (a video player or a folder window, "
+            f"perhaps). Close it and try again.{done}")
+
+
+def remove_file(f: Path) -> None:
+    try:
+        f.unlink()
+    except FileNotFoundError:
+        pass
+    except PermissionError:
+        try:                                            # read-only (copied from a USB stick, say): allowed to go
+            os.chmod(f, stat.S_IWRITE)
+            f.unlink()
+        except OSError as e:
+            raise FileInUse(in_use_message(f)) from e
+
+
+def remove_tree(d: Path) -> None:
+    """Delete a folder. If a file in it is open elsewhere, the rest is deleted and FileInUse says what's left."""
+    def retry(func, path, exc):
+        if isinstance(exc, FileNotFoundError):
+            return
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            raise FileInUse(in_use_message(Path(path), " Everything else in it is gone already.")) from e
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(d, onexc=retry)
+    else:                                               # Python 3.11
+        shutil.rmtree(d, onerror=lambda func, path, info: retry(func, path, info[1]))
 
 
 def _project_dir(root: Path, vid: str) -> Path:
@@ -45,7 +88,7 @@ def usage(root: Path) -> dict:
         src = _size(_sources(d))
         clips = _size(f for f in files if f.relative_to(d).parts[0].startswith("clips"))
         try:
-            title = json.loads((d / "info.json").read_text()).get("title") or d.name
+            title = json.loads((d / "info.json").read_text(encoding="utf-8")).get("title") or d.name
         except (OSError, ValueError):
             title = d.name
         others = [f for f in files if f not in _sources(d)]
@@ -62,15 +105,16 @@ def delete_source(root: Path, vid: str) -> int:
     d = _project_dir(root, vid)
     freed = 0
     for f in _sources(d):
-        freed += f.stat().st_size
-        f.unlink()
+        size = f.stat().st_size
+        remove_file(f)
+        freed += size
     return freed
 
 
 def delete_project(root: Path, vid: str) -> int:
     d = _project_dir(root, vid)
     freed = _size(_files(d))
-    shutil.rmtree(d)
+    remove_tree(d)
     return freed
 
 
@@ -80,5 +124,8 @@ def cleanup_sources(root: Path, older_than_days: int, keep: set[str] = frozenset
     freed = 0
     for p in usage(root)["projects"]:
         if p["has_source"] and p["id"] not in keep and p["modified"] < cutoff:
-            freed += delete_source(root, p["id"])
+            try:
+                freed += delete_source(root, p["id"])
+            except FileInUse:
+                continue                                # open in a player right now: next time
     return freed

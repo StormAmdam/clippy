@@ -140,8 +140,16 @@ def test_missing_tools_hint_matches_the_package_manager(monkeypatch):
     have = set()
     monkeypatch.setattr(download.shutil, "which", lambda t: f"/usr/bin/{t}" if t in have else None)
     have.add("apt-get")
-    assert download.install_hint() == "sudo apt-get install ffmpeg   (yt-dlp: ./setup.sh installs it)"
+    assert download.install_hint(windows=False) == "sudo apt-get install ffmpeg   (yt-dlp: ./setup.sh installs it)"
     have.clear(); have.add("pacman")
-    assert download.install_hint() == "sudo pacman -S ffmpeg yt-dlp"
+    assert download.install_hint(windows=False) == "sudo pacman -S ffmpeg yt-dlp"
     have.clear()
-    assert "./setup.sh" in download.install_hint()
+    assert "./setup.sh" in download.install_hint(windows=False)
+    assert download.install_hint(windows=True) == "Open Clippy, go to AI & Tools and press Set Up Everything."  # app
+
+
+def test_a_job_without_video_tools_says_how_to_get_them(monkeypatch, tmp_output):
+    from clippy import download, pipeline
+    monkeypatch.setattr(download.shutil, "which", lambda t: None)
+    with pytest.raises(RuntimeError, match="video tools .*ffmpeg.* aren't set up yet"):
+        pipeline.run("https://youtu.be/dQw4w9WgXcQ", {})

@@ -203,7 +203,8 @@ def _part_inputs(src: str, parts: list[Part], fps: float) -> list[str]:
 def _measure_loudness(src: str, parts: list[Part], fps: float, target: float, voice: str = "") -> dict | None:
     fc = _speech_graph(parts, fps, 0) + f";[sp]{voice}loudnorm=I={target}:TP=-1.5:LRA=11:print_format=json[a]"
     r = subprocess.run(["ffmpeg", "-hide_banner", "-nostdin", *_part_inputs(src, parts, fps),
-                        "-filter_complex", fc, "-map", "[a]", "-f", "null", "-"], capture_output=True, text=True)
+                        "-filter_complex", fc, "-map", "[a]", "-f", "null", "-"], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", r.stderr, re.S)
     try:
         return json.loads(m.group(0)) if m else None
@@ -467,7 +468,7 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
                     stop.set()
                     return
 
-        with open(err_log, "w") as ef:
+        with open(err_log, "w", encoding="utf-8", errors="replace") as ef:
             enc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ef)
             assert enc.stdin
             reader_t = threading.Thread(target=reader, daemon=True)
@@ -523,7 +524,7 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
                         out_q.get_nowait()
                     out_q.put(None)
                     writer_t.join(timeout=10)
-        return rc, err_log.read_text()
+        return rc, err_log.read_text(encoding="utf-8", errors="replace")
 
     use_nvenc = gpu.has_nvenc()
     rc, err = encode(use_nvenc)

@@ -52,6 +52,7 @@ def test_unit_file_survives_a_folder_with_spaces_and_percent_signs():
 
 def test_enable_and_disable_drive_systemctl(tmp_path, monkeypatch):
     from clippy import autostart
+    monkeypatch.setattr(autostart, "WIN", False)                      # the Linux way, also when tested on Windows
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     calls = []
     monkeypatch.setattr(autostart, "_systemctl", lambda *a: calls.append(a) or (0, "enabled"))

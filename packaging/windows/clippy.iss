@@ -40,7 +40,8 @@ Name: "desktopicon"; Description: "Put a Clippy shortcut on the desktop"
 Source: "..\..\dist\Clippy\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Clippy"; Filename: "{app}\Clippy.exe"
+; the app id lets Clippy's notifications show as "Clippy" (clippy/notify.py)
+Name: "{autoprograms}\Clippy"; Filename: "{app}\Clippy.exe"; AppUserModelID: "StormAmdam.Clippy"
 Name: "{autodesktop}\Clippy"; Filename: "{app}\Clippy.exe"; Tasks: desktopicon
 
 [Run]
@@ -51,12 +52,58 @@ Filename: "{app}\Clippy.exe"; Description: "Start Clippy"; Flags: nowait postins
 Type: filesandordirs; Name: "{app}"
 
 [Code]
+const
+  RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
+  ApprovedKey = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
+
+{ "Start at login" (clippy/autostart.py) adds a Run entry for this folder's Clippy.exe: take it away again }
+procedure RemoveStartAtLogin();
+var
+  Cmd: String;
+begin
+  if RegQueryStringValue(HKEY_CURRENT_USER, RunKey, 'Clippy', Cmd) and
+     (Pos(Lowercase(ExpandConstant('{app}\Clippy.exe')), Lowercase(Cmd)) > 0) then
+  begin
+    RegDeleteValue(HKEY_CURRENT_USER, RunKey, 'Clippy');
+    RegDeleteValue(HKEY_CURRENT_USER, ApprovedKey, 'Clippy');
+  end;
+end;
+
+{ End a running Clippy from this folder (also one running in the background for "Start at login") and its app
+  window, which keeps files open in data\window. The AI engine, ffmpeg and the rest end with Clippy (clippy/quiet.py). }
+procedure StopClippy();
+var
+  App, Script: String;
+  ResultCode: Integer;
+begin
+  App := ExpandConstant('{app}');
+  StringChangeEx(App, '''', '''''', True);       { a ' in the path, doubled for PowerShell }
+  Script := '$d = (''' + App + ''').ToLower(); $w = ''--user-data-dir='' + $d + ''\data\window''; ' +
+    'Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.Name -notlike ''unins*'' -and ' +
+    '(($_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith($d + ''\'')) -or ' +
+    '($_.CommandLine -and $_.CommandLine.ToLower().Contains($w))) } | ' +
+    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }';
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+{ updating: close the running Clippy first, so every file can be replaced }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  if FileExists(ExpandConstant('{app}\Clippy.exe')) then
+    StopClippy();
+  Result := '';
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Clips, Keep: String;
 begin
   if CurUninstallStep = usUninstall then
   begin
+    StopClippy();
+    RemoveStartAtLogin();
     Clips := ExpandConstant('{app}\output');
     if DirExists(Clips) and not UninstallSilent() then
       if MsgBox('Keep your videos and finished shorts?' + #13#10 + #13#10 +

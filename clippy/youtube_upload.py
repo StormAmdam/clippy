@@ -39,9 +39,16 @@ def _private_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(data, f)
-    os.replace(tmp, path)
+    for attempt in range(40):          # Windows: retry while something has the file open for a moment
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 39:
+                raise
+            time.sleep(0.1)
 
 
 def client_path() -> Path:
@@ -60,7 +67,7 @@ def save_client(data: dict) -> None:
 
 
 def _client() -> tuple[str, str]:
-    data = json.loads(client_path().read_text())
+    data = json.loads(client_path().read_text(encoding="utf-8"))
     c = data.get("installed") or data.get("web")
     return c["client_id"], c["client_secret"]
 
@@ -117,7 +124,7 @@ def status(pid: str) -> dict:
     f = _token_path(pid)
     if not f.exists():
         return {"connected": False, "client": has_client()}
-    tok = json.loads(f.read_text())
+    tok = json.loads(f.read_text(encoding="utf-8"))
     return {"connected": True, "client": True, "channel": tok.get("channel")}
 
 
@@ -125,7 +132,7 @@ def disconnect(pid: str) -> None:
     f = _token_path(pid)
     if f.exists():
         try:
-            tok = json.loads(f.read_text())
+            tok = json.loads(f.read_text(encoding="utf-8"))
             httpx.post(REVOKE, params={"token": tok.get("refresh_token")}, timeout=15)
         except Exception:
             pass
@@ -136,7 +143,7 @@ def _access_token(pid: str) -> str:
     f = _token_path(pid)
     if not f.exists():
         raise RuntimeError("This profile isn't connected to YouTube yet.")
-    tok = json.loads(f.read_text())
+    tok = json.loads(f.read_text(encoding="utf-8"))
     if time.time() < tok.get("obtained", 0) + tok.get("expires_in", 0) - 120:
         return tok["access_token"]
     cid, secret = _client()

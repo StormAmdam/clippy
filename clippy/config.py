@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import tomllib
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -83,6 +85,24 @@ def _coerce(value, current):
     return str(value)
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """Write a whole file at once: anyone reading it sees the old version or the new one, never half of each.
+    Windows refuses to replace a file while anything has it open, even for a moment (another thread reading it,
+    the virus scanner checking it), so it tries again for a few seconds before giving up."""
+    path = Path(path)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}-{threading.get_ident()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    for attempt in range(40):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 39:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.1)
+
+
 def settings_file() -> Path:
     """Where the app's Settings page saves its choices (overridable so tests never touch the real one)."""
     return Path(os.environ.get("CLIPPY_SETTINGS_FILE") or ROOT / "settings.json")
@@ -90,7 +110,7 @@ def settings_file() -> Path:
 
 def _read_ui_settings() -> dict:
     try:
-        data = json.loads(settings_file().read_text())
+        data = json.loads(settings_file().read_text(encoding="utf-8-sig"))   # -sig: Notepad may add a BOM
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -106,9 +126,7 @@ def save_ui_settings(changes: dict) -> "Settings":
     merged = {**_read_ui_settings(), **{k: _coerce(v, getattr(defaults, k)) for k, v in changes.items()}}
     path = settings_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(merged, indent=2, ensure_ascii=False))
-    os.replace(tmp, path)
+    write_atomic(path, json.dumps(merged, indent=2, ensure_ascii=False))
     return load()
 
 
@@ -118,7 +136,7 @@ def load(overrides: dict | None = None) -> Settings:
     cfg_file = ROOT / "config.toml"
     layers: list[dict] = []
     if cfg_file.exists():
-        layers.append(tomllib.loads(cfg_file.read_text()))
+        layers.append(tomllib.loads(cfg_file.read_text(encoding="utf-8-sig")))
     layers.append(_read_ui_settings())  # saved from the app's Settings page
     layers.append({k[7:].lower(): v for k, v in os.environ.items() if k.startswith("CLIPPY_")})
     if overrides:

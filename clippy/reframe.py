@@ -197,6 +197,13 @@ def _plan_split(shot: Shot, pair: list[dict], W: int, H: int) -> None:
     shot.layout, shot.panels = "split", panels
 
 
+def face_detector(w: int, h: int, score: float = 0.38):
+    """YuNet, loaded from memory: OpenCV can't open a file path with letters like ö or 测 on Windows
+    (C:\\Users\\Jörg\\…), but Python can."""
+    model = np.frombuffer(FACE_MODEL.read_bytes(), np.uint8)
+    return cv2.FaceDetectorYN.create("onnx", model, np.zeros(0, np.uint8), (w, h), score, 0.3, 20)
+
+
 def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, split_screen: bool = True,
             progress=lambda p: None, fps_str: str | None = None, no_captions: bool = False) -> list[Shot]:
     aw = min(ANALYSIS_W, W)
@@ -204,7 +211,7 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
     sx, sy = W / aw, H / ah
     # low threshold here; strong faces (>= 0.6) are preferred, weak ones are a fallback
     # (e.g. someone looking down at their notes)
-    det = cv2.FaceDetectorYN.create(str(FACE_MODEL), "", (aw, ah), 0.38, 0.3, 20)
+    det = face_detector(aw, ah)
     step = max(1, round(fps / 10))
 
     scores, corrs = [0.0], [1.0]

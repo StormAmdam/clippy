@@ -301,7 +301,8 @@ def install_llamacpp(hw: dict) -> Path:
     if current.is_symlink() or current.exists():
         current.unlink()
     current.symlink_to(target.name)
-    out = subprocess.run([str(current / "llama-server"), "--list-devices"], capture_output=True, text=True, timeout=60)
+    out = subprocess.run([str(current / "llama-server"), "--list-devices"], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", timeout=60)
     if variant == "cuda" and "CUDA0" not in out.stdout + out.stderr:
         print("  ! The CUDA build can't see your GPU (driver too old?). Using the CPU build instead.", flush=True)
         return install_llamacpp({**hw, "nvidia": False, "vulkan": False})

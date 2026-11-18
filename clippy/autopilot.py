@@ -5,10 +5,8 @@ Everything is stored as JSON in output/_auto/ so it survives restarts.
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
-import subprocess
 import threading
 import time
 import uuid
@@ -57,16 +55,13 @@ def auto_dir() -> Path:
 def _read(name: str, default):
     f = auto_dir() / name
     try:
-        return json.loads(f.read_text())
+        return json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         return default
 
 
 def _write(name: str, data) -> None:
-    f = auto_dir() / name
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-    os.replace(tmp, f)
+    config.write_atomic(auto_dir() / name, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 # ───────────────────────── profiles ─────────────────────────
@@ -251,11 +246,8 @@ def _run_profile(pid: str, run_pipeline, progress, log) -> dict:
 
 
 def notify(title: str, body: str) -> None:
-    if shutil.which("notify-send"):
-        try:
-            subprocess.run(["notify-send", "-a", "Clippy", title, body], timeout=5)
-        except Exception:
-            pass
+    from . import notify as desktop
+    desktop.send(title, body)
 
 
 # ───────────────────────── after approval ─────────────────────────
@@ -281,5 +273,5 @@ def export_tiktok(item: dict, profile: dict) -> str:
     caption = (text or item.get("title") or "") + "\n\n" + " ".join(tags)
     if item.get("source_channel"):
         caption += f"\n\nCredit: {item['source_channel']}"
-    target.with_suffix(".txt").write_text(caption.strip() + "\n")
+    target.with_suffix(".txt").write_text(caption.strip() + "\n", encoding="utf-8")
     return str(target.relative_to(root))

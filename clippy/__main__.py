@@ -5,19 +5,11 @@ from pathlib import Path
 if sys.platform == "win32" and not sys.flags.utf8_mode:
     # Windows defaults to a legacy code page, which breaks titles, captions and emoji (and even "→" in a log line).
     # Restart in UTF-8 mode; tools Clippy runs (yt-dlp) inherit it through PYTHONUTF8.
-    import ctypes
     import subprocess
     os.environ["PYTHONUTF8"] = "1"
-    # creationflags=0 on purpose: the restarted Clippy shares this terminal, so its output still shows
+    # creationflags=0 on purpose: the restarted Clippy shares this terminal, so its output still shows.
+    # Like everything Clippy starts, it's tied to this process (clippy/quiet.py): end this one and it ends too.
     child = subprocess.Popen([sys.executable, "-X", "utf8", "-m", "clippy", *sys.argv[1:]], creationflags=0)
-    # tie the restarted Clippy (and the AI engine it starts) to this process: if this one is ended, so are they
-    k32 = ctypes.windll.kernel32
-    k32.CreateJobObjectW.restype = ctypes.c_void_p
-    job = k32.CreateJobObjectW(None, None)
-    info = (ctypes.c_byte * 144)()                     # JOBOBJECT_EXTENDED_LIMIT_INFORMATION (64-bit)
-    ctypes.c_uint32.from_buffer(info, 16).value = 0x2000   # LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if job and k32.SetInformationJobObject(ctypes.c_void_p(job), 9, info, ctypes.sizeof(info)):
-        k32.AssignProcessToJobObject(ctypes.c_void_p(job), ctypes.c_void_p(int(child._handle)))
     while True:
         try:
             sys.exit(child.wait())

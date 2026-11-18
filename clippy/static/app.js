@@ -179,7 +179,7 @@ async function route() {
   el.innerHTML = "";
   document.title = `${TITLES[page]} · Clippy`;
   try { await pages[page](el); }
-  catch (e) { el.innerHTML = `<div class="panel empty"><div class="ic">${icon("alert")}</div><h3>This page couldn't load</h3><p>${esc(e.message)}. Reload the page; if it keeps happening, check the terminal running Clippy.</p></div>`; }
+  catch (e) { el.innerHTML = `<div class="panel empty"><div class="ic">${icon("alert")}</div><h3>This page couldn't load</h3><p>${esc(e.message)}. Reload the page; if it keeps happening, ${state.status?.os === "windows" ? "close Clippy and open it again" : "check the terminal running Clippy"}.</p></div>`; }
   hydrateIcons(el);
 }
 window.addEventListener("hashchange", () => {
@@ -1089,22 +1089,24 @@ pages.ai = async (el) => {
 pages.settings = async (el) => {
   const [s, auto] = await Promise.all([api.get("/api/settings"), api.get("/api/autostart").catch(() => ({supported: false}))]);
   const orig = {...s}, cur = {...s};
+  const win = auto.how === "windows" || auto.how === "windows-source" || state.status?.os === "windows";
+  const autoOff = win ? "Off: Clippy runs while its window is open." : "Off: start it yourself with clippy web.";
   let keyTyped = "";
   const sel = (k, val, opts) => `<select class="input" id="s-${k}" data-k="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(val) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   el.innerHTML = `<div class="ph"><div><h1>Settings</h1><p>These apply to everything new you make. A single video's options still win.</p></div></div>
     <section class="panel" style="padding-top:4px;padding-bottom:16px">
-      <div class="set"><div><b>Start at login</b><p>Keeps Clippy running in the background so scheduled Autopilot runs happen even when no terminal is open.</p></div>
-        <div>${auto.supported ? `<label class="switch"><span class="ic">${icon("power")}</span><span class="txt"><b>Start Clippy when you log in</b><small id="autoNote">${auto.enabled ? "On: Clippy starts automatically at login." : "Off: start it yourself with ./clippy.sh web."}</small></span><input type="checkbox" id="autoSw" ${auto.enabled ? "checked" : ""}></label>`
-          : `<p class="muted">Not available on this system. It needs systemd.</p>`}</div></div>
-      <div class="set"><div><b>AI that picks the clips</b><p>Clippy finds llama.cpp, Ollama, LM Studio, Jan, KoboldCpp or vLLM by itself, on this computer or on Windows when you use WSL. Choose a server or model here only if you want a specific one.</p></div>
+      <div class="set"><div><b>Start at login</b><p>${win ? "Keeps Clippy running in the background, also after you close its window, so scheduled Autopilot runs happen. Open Clippy as usual to see it." : "Keeps Clippy running in the background so scheduled Autopilot runs happen even when no terminal is open."}</p></div>
+        <div>${auto.supported ? `<label class="switch"><span class="ic">${icon("power")}</span><span class="txt"><b>Start Clippy when you log in</b><small id="autoNote">${auto.enabled ? "On: Clippy starts automatically at login." : autoOff}</small></span><input type="checkbox" id="autoSw" ${auto.enabled ? "checked" : ""}></label>`
+          : `<p class="muted">${auto.how === "windows-source" ? "Available in the Clippy app for Windows." : win ? "Not available here." : "Not available on this system. It needs systemd."}</p>`}</div></div>
+      <div class="set"><div><b>AI that picks the clips</b><p>Clippy uses its built-in AI (AI &amp; Tools), or finds llama.cpp, Ollama, LM Studio, Jan, KoboldCpp or vLLM by itself${win ? "" : ", on this computer or on Windows when you use WSL"}. Choose a server or model here only if you want a specific one.</p></div>
         <div class="stack"><div class="aibox" id="aiBox" aria-live="polite"><span class="small muted">Looking for AI servers…</span></div>
           <label class="field"><span>Server address (auto finds one by itself)</span><input class="input" data-k="llm_url" autocomplete="off" spellcheck="false" value="${esc(s.llm_url)}" placeholder="auto"></label>
           <label class="field"><span>Model (empty: the one already loaded, or your newest download)</span><input class="input" data-k="llm_model" list="aiModels" autocomplete="off" spellcheck="false" value="${esc(s.llm_model)}" placeholder="qwen3.5:9b…"><datalist id="aiModels"></datalist></label>
           <label class="field"><span>API key (only for cloud services like Groq or Gemini)</span><input class="input" type="password" id="apiKey" autocomplete="off" placeholder="${s.has_llm_api_key ? "Saved. Type a new key to replace it…" : "gsk_…"}"></label>
           <label class="switch"><span class="ic">${icon("sparkles")}</span><span class="txt"><b>Let the AI think first</b><small>Slower, sometimes smarter picks</small></span><input type="checkbox" data-k="llm_thinking" ${s.llm_thinking ? "checked" : ""}></label></div></div>
-      <div class="set"><div><b>Graphics card</b><p>Whisper needs about 2.6 GB of graphics memory. When the AI is holding it, Clippy pauses the AI service named below, or asks Ollama to unload its model, and gives the memory back afterwards.</p></div>
+      <div class="set"><div><b>Graphics card</b><p>Whisper needs about 2.6 GB of graphics memory. When the AI is holding it, Clippy pauses its built-in AI${win ? "" : " or the AI service named below"}, or asks Ollama to unload its model, and gives the memory back afterwards.</p></div>
         <div class="stack"><label class="switch"><span class="ic">${icon("zap")}</span><span class="txt"><b>Free the GPU for transcribing</b><small>About 10× faster transcription. Off means transcribing on the CPU when memory is short.</small></span><input type="checkbox" data-k="free_gpu_for_whisper" ${s.free_gpu_for_whisper ? "checked" : ""}></label>
-          <label class="field"><span>AI service name (systemd user service)</span><input class="input" data-k="llama_service" autocomplete="off" spellcheck="false" value="${esc(s.llama_service)}" placeholder="llama-coder…"></label>
+          ${win ? "" : `<label class="field"><span>AI service name (systemd user service)</span><input class="input" data-k="llama_service" autocomplete="off" spellcheck="false" value="${esc(s.llama_service)}" placeholder="llama-coder…"></label>`}
           <label class="field"><span>Speech-to-text model</span>${sel("whisper_model", s.whisper_model, [["large-v3-turbo", "Large v3 Turbo (best)"], ["medium", "Medium (faster)"], ["small", "Small (fastest)"]])}</label></div></div>
       <div class="set"><div><b>New clips</b><p>The starting point on Make Clips and for new Autopilot channels.</p></div>
         <div class="stack"><div class="grid g3">
@@ -1159,7 +1161,7 @@ pages.settings = async (el) => {
   };
   $("#autoSw")?.addEventListener("change", async (e) => {
     const on = e.target.checked;
-    try { const r = await api.post("/api/autostart", {enabled: on}); $("#autoNote").textContent = r.enabled ? "On: Clippy starts automatically next time you log in." : "Off: start it yourself with ./clippy.sh web."; toast(r.enabled ? "Clippy will start at login" : "Start at login turned off"); }
+    try { const r = await api.post("/api/autostart", {enabled: on}); $("#autoNote").textContent = r.enabled ? (win ? "On: Clippy starts at login, and keeps running after you close its window." : "On: Clippy starts automatically next time you log in.") : autoOff; toast(r.enabled ? "Clippy will start at login" : "Start at login turned off"); }
     catch (err) { e.target.checked = !on; fail(err); }
   });
 };

@@ -7,6 +7,7 @@ import json
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -151,7 +152,7 @@ def library():
         if res.parent.name in config.INTERNAL_DIRS:
             continue
         try:
-            data = json.loads(res.read_text())
+            data = json.loads(res.read_text(encoding="utf-8"))
         except Exception:
             continue
         data["clips"] = [c for c in data.get("clips", []) if (OUT / c["file"]).exists()]
@@ -182,6 +183,8 @@ def storage_delete_source(vid: str):
         raise HTTPException(409, "A job is running — try again when it has finished.")
     try:
         return {"freed": storage.delete_source(OUT, vid)}
+    except storage.FileInUse as e:
+        raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -195,6 +198,8 @@ def storage_delete_project(vid: str):
         raise HTTPException(409, "A job is running — try again when it has finished.")
     try:
         return {"freed": storage.delete_project(OUT, vid)}
+    except storage.FileInUse as e:
+        raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -278,6 +283,7 @@ def status():
     jobs = STORE.all()
     running = next((j for j in jobs if j["state"] == "running"), None)
     return {"llm": _llm_cache["ok"], "model": _llm_cache["model"], "ai": _llm_cache["server"],
+            "folder": str(config.ROOT), "os": "windows" if sys.platform == "win32" else "linux",
             "ai_error": _llm_cache["error"], "vram_free": gpu.free_vram_mb(),
             "queued": sum(1 for j in jobs if j["state"] == "queued"),
             "running": {k: running.get(k) for k in ("id", "kind", "url", "stage", "pct", "msg", "profile_id")} if running else None}
@@ -357,14 +363,18 @@ def setup_cancel(body: SetupIn):
 def setup_remove(body: SetupIn):
     from . import components, engine
     cfg = config.load()
-    if body.file:
-        engine.remove_model(body.file)
-        if cfg.ai_model == Path(body.file).name:
-            config.save_ui_settings({"ai_model": ""})
-    elif body.id in components.PARTS:
-        components.remove(body.id, cfg)
-    else:
-        raise HTTPException(404, "Unknown part")
+    try:
+        if body.file:
+            engine.remove_model(body.file)
+            if cfg.ai_model == Path(body.file).name:
+                config.save_ui_settings({"ai_model": ""})
+        elif body.id in components.PARTS:
+            components.remove(body.id, cfg)
+        else:
+            raise HTTPException(404, "Unknown part")
+    except PermissionError:                     # Windows: a running program has it open
+        raise HTTPException(409, "Couldn't remove it because it's in use right now (by a video being made, or "
+                                 "another AI app). Try again when Clippy is idle.")
     _llm_cache["t"] = 0.0
     return {"ok": True}
 

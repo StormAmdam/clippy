@@ -6,11 +6,12 @@ server stopped comes back as "interrupted".
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 import uuid
 from pathlib import Path
+
+from .config import write_atomic
 
 KEEP_JOBS = 60      # finished jobs remembered
 KEEP_LOG = 80       # log lines persisted per job
@@ -28,7 +29,7 @@ class JobStore:
         self._jobs: dict[str, dict] = {}
         self._last_save = 0.0
         try:
-            saved = json.loads(self.path.read_text())
+            saved = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             saved = []
         if not isinstance(saved, list):   # a damaged history file must never stop Clippy from starting
@@ -122,8 +123,6 @@ class JobStore:
         data = [{**j, "log": j["log"][-KEEP_LOG:]} for j in sorted(self._jobs.values(), key=lambda j: j["created"])]
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, ensure_ascii=False, default=str))
-            os.replace(tmp, self.path)
+            write_atomic(self.path, json.dumps(data, ensure_ascii=False, default=str))
         except OSError:
             pass  # history is a convenience; never break a job over it
