@@ -95,12 +95,12 @@ def fetch(url: str, dest: Path, task: Task, label: str) -> Path:
     return aisetup.download(url, dest, label, progress=task.progress, cancelled=task.cancelled)
 
 
-def _github(url: str):
+def _github(url: str, timeout: float = 30):
     import os
     headers = {"Accept": "application/vnd.github+json"}
     if os.environ.get("GITHUB_TOKEN"):                 # CI machines share IPs and hit the anonymous rate limit
         headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
-    r = httpx.get(url, timeout=30, follow_redirects=True, headers=headers)
+    r = httpx.get(url, timeout=timeout, follow_redirects=True, headers=headers)
     r.raise_for_status()
     return r.json()
 

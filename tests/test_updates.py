@@ -142,3 +142,31 @@ def test_only_this_pc_can_start_an_update(fresh, monkeypatch, tmp_output):
     monkeypatch.setattr(updates, "how", lambda: "portable")
     r = here.post("/api/update/install")
     assert r.status_code == 400 and "download page" in r.json()["detail"]
+
+
+def test_an_installer_name_that_is_a_path_is_never_used(fresh, monkeypatch):
+    monkeypatch.setattr(updates, "how", lambda: "installer")
+    github_answers(monkeypatch, release("v99.0.0", name="..\\..\\Startup\\Clippy-Setup-99.0.0-win64.exe"))
+    s = updates.status()
+    assert s["newer"] and not s["can_install"]
+    with pytest.raises(updates.UpdateError):
+        updates.install()
+
+
+def test_the_windows_app_without_an_installer_in_the_release_gets_the_download_page():
+    js = (__import__("pathlib").Path(__file__).parents[1] / "clippy/static/app.js").read_text(encoding="utf-8")
+    block = js[js.index("const action = u.can_install"):js.index("bg.innerHTML", js.index("const action = u.can_install"))]
+    assert block.index('u.how === "install-line"') < block.index("Copy the Install Line") < block.index("Open the Download Page")
+
+
+def test_no_update_while_a_video_is_being_made(fresh, monkeypatch, tmp_output):
+    from fastapi.testclient import TestClient
+
+    from clippy import server
+    monkeypatch.setattr(updates, "how", lambda: "installer")
+    monkeypatch.setattr(server, "work_in_progress", lambda: True)
+    started = []
+    monkeypatch.setattr(updates, "install", lambda: started.append(1))
+    here = TestClient(server.app, base_url="http://127.0.0.1:7860", client=("127.0.0.1", 50000))
+    r = here.post("/api/update/install")
+    assert r.status_code == 409 and "when it's done" in r.json()["detail"] and started == []

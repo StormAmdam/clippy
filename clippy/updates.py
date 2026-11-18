@@ -25,7 +25,7 @@ FEED = os.environ.get("CLIPPY_UPDATE_FEED") or f"https://api.github.com/repos/{R
 RELEASES = f"https://github.com/{REPO}/releases/latest"
 INSTALL_LINE = "curl -fsSL https://raw.githubusercontent.com/StormAmdam/clippy/main/install.sh | bash"
 CHECK_EVERY = 6 * 3600
-SETUP = re.compile(r"Clippy-Setup-([\d.]+)-win64\.exe$")
+SETUP = re.compile(r"Clippy-Setup-([\d.]+)-win64\.exe")   # the whole name (fullmatch): never a path
 _cache: dict = {"t": 0.0, "release": None, "error": ""}
 
 
@@ -52,9 +52,7 @@ def _release(force: bool = False) -> dict | None:
     if not force and _cache["release"] is not None and time.time() - _cache["t"] < CHECK_EVERY:
         return _cache["release"]
     try:
-        r = httpx.get(FEED, timeout=8, follow_redirects=True, headers={"Accept": "application/vnd.github+json"})
-        r.raise_for_status()
-        data = r.json()
+        data = components._github(FEED, timeout=8)
         if not isinstance(data, dict) or not data.get("tag_name"):
             raise ValueError("no release in the answer")
         _cache.update(t=time.time(), release=data, error="")
@@ -65,7 +63,7 @@ def _release(force: bool = False) -> dict | None:
 
 
 def _setup_asset(rel: dict) -> dict | None:
-    return next((a for a in rel.get("assets") or [] if SETUP.search(str(a.get("name", "")))), None)
+    return next((a for a in rel.get("assets") or [] if SETUP.fullmatch(str(a.get("name", "")))), None)
 
 
 def status(force: bool = False) -> dict:
@@ -94,7 +92,7 @@ def _task() -> dict | None:
 def _tidy() -> None:
     """Installers downloaded for earlier updates aren't needed once Clippy is up to date."""
     for f in components.DOWNLOADS.glob("Clippy-Setup-*-win64.exe") if components.DOWNLOADS.exists() else []:
-        m = SETUP.search(f.name)
+        m = SETUP.fullmatch(f.name)
         if m and parse(m.group(1)) <= parse(VERSION):
             f.unlink(missing_ok=True)
 

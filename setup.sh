@@ -231,7 +231,19 @@ setup_ollama() {
   ok "Ollama is ready with $model"
 }
 setup_llamacpp() {
-  "$VPY" -m clippy.aisetup llamacpp || { warn "llama.cpp setup didn't finish (see above)."; return 1; }
+  local had=0 before f ok=0
+  { [ -e "$HOME/.local/opt/llama.cpp" ] || [ -e "$HOME/.local/bin/llama-coder" ]; } && had=1
+  before=$(ls "$HOME"/models/*.gguf 2>/dev/null || true)
+  "$VPY" -m clippy.aisetup llamacpp && ok=1
+  # note what this added (also after a half-finished run), so clippy uninstall offers exactly that: never a
+  # llama.cpp or model that was here before
+  if [ "$had" = 0 ] && { [ -e "$HOME/.local/opt/llama.cpp" ] || [ -e "$HOME/.local/bin/llama-coder" ]; }; then
+    record llamacpp
+  fi
+  for f in "$HOME"/models/*.gguf; do
+    [ -e "$f" ] && ! grep -qxF "$f" <<<"$before" && record model "$f"
+  done
+  [ "$ok" = 1 ] || { warn "llama.cpp setup didn't finish (see above)."; return 1; }
   if ! systemctl --user is-active --quiet llama-coder 2>/dev/null; then   # no systemd: start it for now
     (nohup "$HOME/.local/bin/llama-coder" >"$HOME/.llama-coder.log" 2>&1 &)
   fi

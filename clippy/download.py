@@ -30,6 +30,56 @@ def _why(r: subprocess.CompletedProcess) -> str:
     return f"it stopped with code {r.returncode} without saying why"
 
 
+UPLOAD = "download the video yourself and upload the file (Make Clips → Upload Video)"
+# what yt-dlp says, in plain words with what to do: the failures people actually run into, most specific first
+PLAIN = [
+    (r"confirm you.?re not a bot", "YouTube wants to check that this PC isn't a bot. That happens on some networks "
+     f"(a VPN, a school or office network). Try again later or without the VPN, or {UPLOAD}."),
+    (r"confirm your age|age.restricted|inappropriate for some users",
+     f"YouTube only shows this video to signed-in adults. Instead, {UPLOAD}."),
+    (r"members.only|join this channel", f"This video is for the channel's members only. Instead, {UPLOAD}."),
+    (r"private video", "This video is private: only videos everyone can watch work."),
+    (r"premieres in|live event will begin|this live event|is upcoming",
+     "This video hasn't started yet (a premiere or an upcoming live stream). Try again once it's out."),
+    (r"video unavailable|has been removed|account associated with this video|not available in your country|"
+     r"blocked it in your country|copyright claim", "YouTube says this video isn't available (removed, private, or "
+     "blocked where you are)."),
+    (r"http error 429|too many requests", "YouTube is limiting this connection for now. Try again in a while."),
+    (r"unsupported url|is not a valid url|no video formats found",
+     "That link isn't a video Clippy can open. Paste a YouTube video link, or upload a video file."),
+    (r"getaddrinfo failed|name or service not known|temporary failure in name resolution|failed to resolve|"
+     r"no address associated|network is unreachable|timed out|connection (refused|reset)|unable to connect",
+     "Couldn't reach YouTube. Check the internet connection and try again."),
+]
+# failures that usually mean YouTube changed something and yt-dlp needs updating
+OUTDATED = re.compile(r"requested format is not available|signature extraction failed|nsig extraction failed|"
+                      r"unable to extract|precondition check failed|http error 403", re.I)
+
+
+def explain(raw: str) -> str:
+    """yt-dlp's last words, said plainly when it's a known failure (with yt-dlp's own words after it)."""
+    raw = raw.strip()
+    for pattern, plain in PLAIN:
+        if re.search(pattern, raw, re.I):
+            return f"{plain} (yt-dlp: {raw[:180]})"
+    if OUTDATED.search(raw):
+        return ("YouTube changed something, and Clippy's YouTube download tool (yt-dlp) needs an update. "
+                + ("Clippy updates it by itself; try again in a few minutes." if sys.platform == "win32"
+                   else "Run  bash setup.sh  in Clippy's folder to update it.") + f" (yt-dlp: {raw[:180]})")
+    return raw or "unknown error"
+
+
+def _refresh_ytdlp() -> bool:
+    """When yt-dlp lives in Clippy's own Python: update it now (after a failure that looks like an old version)."""
+    if importlib.util.find_spec("yt_dlp") is None:
+        return False
+    from . import components
+    before = components.ytdlp_version()
+    components.update_ytdlp(max_age_days=0, log=lambda m: print(m, flush=True))
+    importlib.invalidate_caches()
+    return components.ytdlp_version() != before
+
+
 def _slug(text: str) -> str:
     s = re.sub(r"[^A-Za-z0-9_-]+", "-", text).strip("-")
     return s[:60] or "video"
@@ -51,10 +101,14 @@ def probe(url: str) -> dict:
                              capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
         return {"id": "local-" + _slug(p.stem), "title": p.stem, "duration": float(dur or 0),
                 "uploader": "", "local_path": str(p.resolve()), "webpage_url": str(p.resolve())}
-    r = subprocess.run([*ytdlp(), "-J", "--no-playlist", "--no-warnings", url],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
+    def read():
+        return subprocess.run([*ytdlp(), "-J", "--no-playlist", "--no-warnings", url],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
+    r = read()
+    if r.returncode != 0 and OUTDATED.search(_why(r)) and _refresh_ytdlp():
+        r = read()                                     # a newer yt-dlp may read it now
     if r.returncode != 0:
-        raise RuntimeError(f"yt-dlp could not read that link: {_why(r)}")
+        raise RuntimeError(f"Couldn't open that video: {explain(_why(r))}")
     info = json.loads(r.stdout)
     return {"id": _slug(info.get("id", "video")), "title": info.get("title", ""),
             "duration": float(info.get("duration") or 0), "uploader": info.get("uploader") or info.get("channel") or "",
@@ -103,24 +157,33 @@ def download(url: str, info: dict, workdir: Path, max_height: int, progress=lamb
         "--progress-template", "download:PROG %(progress._percent_str)s",
         "-o", str(workdir / "source.%(ext)s"), url,
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                            errors="replace")
-    part, last = 0, 0.0
-    tail: list[str] = []
-    assert proc.stdout
-    for line in proc.stdout:
-        line = line.strip()
-        tail = (tail + [line])[-8:]
-        m = re.search(r"PROG\s+([\d.]+)%", line)
-        if m:
-            pct = float(m.group(1)) / 100
-            if pct < last - 0.5:  # second stream (audio) started
-                part += 1
-            last = pct
-            overall = min(0.99, (part + pct) / 2) if part < 2 else 0.99
-            progress(overall, f"Downloading… {pct * 100:.0f}%")
-    if proc.wait() != 0:
-        raise RuntimeError("Download failed:\n" + "\n".join(tail))
+    def run() -> tuple[int, list[str]]:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                errors="replace")
+        part, last = 0, 0.0
+        tail: list[str] = []
+        assert proc.stdout
+        for line in proc.stdout:
+            line = line.strip()
+            tail = (tail + [line])[-8:]
+            m = re.search(r"PROG\s+([\d.]+)%", line)
+            if m:
+                pct = float(m.group(1)) / 100
+                if pct < last - 0.5:  # second stream (audio) started
+                    part += 1
+                last = pct
+                overall = min(0.99, (part + pct) / 2) if part < 2 else 0.99
+                progress(overall, f"Downloading… {pct * 100:.0f}%")
+        return proc.wait(), tail
+
+    code, tail = run()
+    reason = next((t for t in reversed(tail) if t.startswith("ERROR")), next((t for t in reversed(tail) if t), ""))
+    if code != 0 and OUTDATED.search(reason) and _refresh_ytdlp():
+        progress(0.0, "Updated the YouTube download tool; trying again…")
+        code, tail = run()
+        reason = next((t for t in reversed(tail) if t.startswith("ERROR")), next((t for t in reversed(tail) if t), ""))
+    if code != 0:
+        raise RuntimeError(f"The download stopped: {explain(reason)}" if reason else "The download stopped without a reason")
     files = [f for f in workdir.glob("source.*") if f.suffix in (".mp4", ".mkv", ".webm", ".mov")]
     if not files:
         raise RuntimeError("Download finished but no video file was found")

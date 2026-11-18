@@ -22,6 +22,7 @@ from . import config
 PORTS = [int(os.environ["CLIPPY_PORT"])] if os.environ.get("CLIPPY_PORT") else list(range(7860, 7870))
 PORT_FILE = config.ROOT / "data" / "port.txt"     # where this Clippy runs, for the next start to find it
 IDLE_QUIT = 45          # seconds without the window asking for status before Clippy quits
+LOG_MAX = 5_000_000     # data\clippy.log moves to clippy.log.1 beyond this, when Clippy starts
 
 
 def _browser() -> list[str] | None:
@@ -138,7 +139,13 @@ def main(argv: list[str] | None = None) -> int:
     logs = config.ROOT / "data"
     logs.mkdir(parents=True, exist_ok=True)
     if sys.stdout is None or sys.stderr is None:
-        sys.stdout = sys.stderr = open(logs / "clippy.log", "a", buffering=1, encoding="utf-8", errors="replace")
+        log = logs / "clippy.log"
+        try:                                           # kept small: Start at login can keep Clippy running for weeks
+            if log.stat().st_size > LOG_MAX:
+                os.replace(log, log.with_suffix(".log.1"))
+        except OSError:                                # not there yet, or another Clippy has it open
+            pass
+        sys.stdout = sys.stderr = open(log, "a", buffering=1, encoding="utf-8", errors="replace")
     from . import server
     from .engine import ENGINE
     port, running = find_port()

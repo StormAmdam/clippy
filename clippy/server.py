@@ -482,6 +482,9 @@ def update_status(request: Request, force: bool = False):
 def update_install(request: Request):
     from . import updates
     this_computer_only(request)
+    if work_in_progress() or any(j["state"] == "running" for j in SCANS.values()):   # the update closes Clippy
+        raise HTTPException(409, "Clippy is making a video or scanning right now. Update when it's done "
+                                 "(the update closes Clippy for a moment).")
     try:
         return updates.install()
     except updates.UpdateError as e:

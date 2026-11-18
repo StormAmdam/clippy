@@ -4,7 +4,7 @@
 
 #define AppVersion GetEnv("CLIPPY_VERSION")
 #if AppVersion == ""
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.2.1"
 #endif
 
 [Setup]
@@ -104,25 +104,61 @@ begin
   Result := '';
 end;
 
+{ Windows' own Videos folder: it may have been moved into OneDrive or onto another drive }
+function VideosFolder(): String;
+begin
+  Result := GetShellFolderByCSIDL($000E, True);    { CSIDL_MYVIDEO }
+  if Result = '' then
+    Result := GetEnv('USERPROFILE') + '\Videos';
+end;
+
+{ move a folder, also onto another drive (where RenameFile can't): copy it, the uninstaller deletes the original }
+function MoveFolder(Src, Dst: String): Boolean;
+var
+  S, D: String;
+  ResultCode: Integer;
+begin
+  Result := RenameFile(Src, Dst);
+  if Result then
+    exit;
+  S := Src;
+  D := Dst;
+  StringChangeEx(S, '''', '''''', True);
+  StringChangeEx(D, '''', '''''', True);
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+                 '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference = ''Stop''; ' +
+                 'Copy-Item -LiteralPath ''' + S + ''' -Destination ''' + D + ''' -Recurse"',
+                 '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) and DirExists(Dst);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Clips, Keep: String;
+  KeepThem: Boolean;
 begin
   if CurUninstallStep = usUninstall then
   begin
     StopClippy();
     RemoveStartAtLogin();
     Clips := ExpandConstant('{app}\output');
-    if DirExists(Clips) and not UninstallSilent() then
-      if MsgBox('Keep your videos and finished shorts?' + #13#10 + #13#10 +
-                'Yes: they move to your Videos folder (Videos\Clippy).' + #13#10 +
-                'No: they are deleted along with the AI models, tools and settings.',
-                mbConfirmation, MB_YESNO) = IDYES then
+    if DirExists(Clips) then
+    begin
+      { silent uninstalls delete them unless /KEEPSHORTS=1 }
+      if UninstallSilent() then
+        KeepThem := ExpandConstant('{param:KEEPSHORTS|0}') = '1'
+      else
+        KeepThem := MsgBox('Keep your videos and finished shorts?' + #13#10 + #13#10 +
+                           'Yes: they move to your Videos folder (Videos\Clippy).' + #13#10 +
+                           'No: they are deleted along with the AI models, tools and settings.',
+                           mbConfirmation, MB_YESNO) = IDYES;
+      if KeepThem then
       begin
-        Keep := GetEnv('USERPROFILE') + '\Videos\Clippy';
+        Keep := VideosFolder() + '\Clippy';
         ForceDirectories(Keep);
-        if not RenameFile(Clips, Keep + '\shorts-' + GetDateTimeString('yyyymmdd-hhnnss', '-', '-')) then
+        if not MoveFolder(Clips, Keep + '\shorts-' + GetDateTimeString('yyyymmdd-hhnnss', '-', '-')) and
+           not UninstallSilent() then
           MsgBox('Clippy couldn''t move your shorts. Copy them out of ' + Clips + ' now: they are deleted when you press OK.', mbError, MB_OK);
       end;
+    end;
   end;
 end;

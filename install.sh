@@ -19,6 +19,11 @@ command -v curl >/dev/null || { echo "Needs curl first:  sudo apt install curl  
 if [ -d "$DEST/.git" ]; then
   say "Updating Clippy in $DEST"
   git -C "$DEST" pull --ff-only
+elif [ -f "$DEST/clippy.sh" ] && [ -f "$DEST/setup.sh" ]; then
+  # installed without git (from the archive): update the same way. Your videos, settings and models stay (they
+  # aren't in the archive)
+  say "Updating Clippy in $DEST"
+  curl -fsSL "${CLIPPY_TARBALL:-$REPO/archive/refs/heads/main.tar.gz}" | tar xz -C "$DEST" --strip-components=1
 elif [ -e "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ]; then
   echo "$DEST already exists and isn't a Clippy download. Pick another folder:  CLIPPY_DIR=~/somewhere-else"
   exit 1

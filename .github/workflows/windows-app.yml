@@ -15,9 +15,9 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CLIPPY_NO_UPDATES: "1"     # the app's own yt-dlp update; smoke.py tests it directly
-      CLIPPY_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.2.1-dev.{0}', github.run_number) }}
+      CLIPPY_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.2.2-dev.{0}', github.run_number) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Inno Setup
@@ -30,6 +30,7 @@ jobs:
         run: |
           $v = (Select-String -Path clippy/version.py -Pattern 'VERSION = "(.+)"').Matches[0].Groups[1].Value
           if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "clippy/version.py says $v but the tag is $env:GITHUB_REF_NAME: the app would tell people the wrong version" }
+          if (-not (Select-String -Path packaging/windows/launcher.rc -SimpleMatch "`"ProductVersion`", `"$v`"")) { throw "packaging/windows/launcher.rc doesn't say $v: Clippy.exe would show the wrong version" }
       - name: Build, smoke-test and package
         shell: pwsh
         run: ./packaging/windows/build.ps1 -SmokeTest
@@ -162,9 +163,22 @@ jobs:
           Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$dir*" -and $_.Name -notlike "unins*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           Stop-Process -Id $web.Id -Force
           Start-Sleep 3
-          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
-          foreach ($i in 1..20) { if (-not (Test-Path $dir)) { break }; Start-Sleep 1 }
+          # uninstalling keeps the shorts in Windows' own Videos folder, here moved to another drive (as OneDrive or a
+          # second disk does), so they have to be copied across rather than renamed
+          New-Item -ItemType Directory -Force "$dir\output\abc123\clips" | Out-Null
+          Set-Content "$dir\output\abc123\clips\01-hook.mp4" "a short"
+          $shell = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+          $oldVideos = (Get-ItemProperty $shell)."My Video"
+          $videos = "D:\Videos elsewhere"
+          New-Item -ItemType Directory -Force $videos | Out-Null
+          Set-ItemProperty $shell -Name "My Video" -Value $videos
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/KEEPSHORTS=1" -Wait
+          foreach ($i in 1..30) { if (-not (Test-Path $dir)) { break }; Start-Sleep 1 }
+          Set-ItemProperty $shell -Name "My Video" -Value $oldVideos -Type ExpandString
           if (Test-Path $dir) { throw "Uninstalling after the update test left files behind" }
+          $kept = Get-ChildItem "$videos\Clippy\shorts-*\abc123\clips\01-hook.mp4" -ErrorAction SilentlyContinue
+          if (-not $kept) { Get-ChildItem -Recurse $videos -ErrorAction SilentlyContinue | Select-Object FullName; throw "The uninstaller didn't keep the shorts in the Videos folder on D:" }
+          "Kept the shorts in the moved Videos folder: $($kept.FullName)"
       - name: Update over the previous release, in a folder with non-English letters
         shell: pwsh
         run: |
@@ -229,7 +243,7 @@ jobs:
           foreach ($i in 1..20) { if (-not (Test-Path $dir)) { break }; Start-Sleep 1 }
           if (Test-Path $dir) { Get-ChildItem -Recurse $dir | Select-Object -First 20 FullName; throw "Uninstalling left files behind" }
           "Updated and uninstalled: nothing left behind"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: smoke-test-clip-${{ env.CLIPPY_VERSION }}
@@ -237,7 +251,7 @@ jobs:
             dist/smoke/
             dist/server.log*
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Clippy-windows-${{ env.CLIPPY_VERSION }}
           path: |

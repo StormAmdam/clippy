@@ -1384,13 +1384,13 @@ function showUpdate(u) {
   const bg = document.createElement("div");
   bg.className = "modal-bg"; bg.id = "updModal";
   const action = u.can_install ? `<button type="button" class="btn primary" id="updGo">${icon("download")} Update Now</button>`
-    : u.how === "portable" ? `<a class="btn primary" href="${esc(u.url || u.releases)}" target="_blank" rel="noopener">${icon("external")} Open the Download Page</a>`
-    : `<button type="button" class="btn primary" id="updCopy">${icon("copy")} Copy the Install Line</button>`;
+    : u.how === "install-line" ? `<button type="button" class="btn primary" id="updCopy">${icon("copy")} Copy the Install Line</button>`
+    : `<a class="btn primary" href="${esc(u.url || u.releases)}" target="_blank" rel="noopener">${icon("external")} Open the Download Page</a>`;
   bg.innerHTML = `<div class="modal small" role="dialog" aria-modal="true" aria-labelledby="updT">
     <div class="mh"><h2 id="updT">Hey, there's a new update!</h2></div>
     <div class="mb"><p>Clippy <b>${esc(u.latest)}</b> is out, and you have ${esc(u.current)}. You don't have to update, but it's recommended.</p>
       ${u.how === "install-line" ? `<p class="small muted" style="margin:10px 0 6px">To update, run this in a terminal (it keeps your shorts and settings):</p><div class="aibox break" style="font:13px/1.5 ui-monospace,monospace">${esc(u.install_line)}</div>` : ""}
-      ${u.how === "installer" ? `<p class="small muted" style="margin:8px 0 0">It keeps your AI models, settings and shorts. Clippy closes while it updates and opens again by itself.</p>` : ""}
+      ${u.can_install ? `<p class="small muted" style="margin:8px 0 0">It keeps your AI models, settings and shorts. Clippy closes while it updates and opens again by itself.</p>` : ""}
       ${u.notes ? `<div class="aibox small" style="margin-top:14px;max-height:240px;overflow:auto">${notesHtml(u.notes)}</div>` : ""}
       <div id="updProg" class="hidden" style="margin-top:14px"></div></div>
     <div class="mf"><span class="grow"></span><button type="button" class="btn quiet" id="updLater">Not Now</button>${action}</div></div>`;
@@ -1405,13 +1405,20 @@ function showUpdate(u) {
     $("#updGo", bg).disabled = $("#updLater", bg).disabled = true;
     const prog = $("#updProg", bg); prog.classList.remove("hidden");
     try { await api.post("/api/update/install"); } catch (e) { fail(e); $("#updGo", bg).disabled = $("#updLater", bg).disabled = false; return; }
-    let gone = false;
+    let gone = false, doneAt = 0;
+    const again = () => { $("#updGo", bg).disabled = $("#updLater", bg).disabled = false; };   // try again, or Not Now
     const t = setInterval(async () => {
       let s = null; try { s = await api.get("/api/update"); } catch {}
       if (!s) { gone = true; prog.innerHTML = `<p class="small">Installing the update. Clippy opens again by itself in a moment.</p>`; return; }
       if (gone) { clearInterval(t); location.reload(); return; }                 // back after updating
       const k = s.task || {};
-      if (k.state === "failed") { clearInterval(t); prog.innerHTML = `<span class="err-text">${esc(k.error)}</span>`; $("#updLater", bg).disabled = false; return; }
+      if (k.state === "failed") { clearInterval(t); prog.innerHTML = `<span class="err-text">${esc(k.error)}</span>`; again(); return; }
+      if (k.state === "done" && !doneAt) doneAt = Date.now();
+      if (doneAt && Date.now() - doneAt > 90000) {                              // the installer never closed Clippy
+        clearInterval(t);
+        prog.innerHTML = `<span class="err-text">The installer didn't finish. Close Clippy (Settings → Quit Clippy) and press Update Now again, or install it from the download page.</span>`;
+        again(); return;
+      }
       const pct = k.total ? Math.round(100 * k.done / k.total) : null;
       prog.innerHTML = `<div class="bar ${pct == null ? "wait" : ""}"><i style="width:${pct ?? 0}%"></i></div>
         <p class="small muted" style="margin:8px 0 0">${esc(k.step || (pct != null ? `Downloading ${fmtBytes(k.done)} of ${fmtBytes(k.total)}` : "Getting the update…"))}</p>`;

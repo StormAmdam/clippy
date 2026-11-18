@@ -213,7 +213,6 @@ def _run_profile(pid: str, run_pipeline, progress, log) -> dict:
         raise RuntimeError("No new eligible videos found." + hint)
     chosen = cands[: p["videos_per_run"]]
     total_clips = 0
-    root = config.output_root(config.load())
     for vi, r in enumerate(chosen):
         url = "https://www.youtube.com/watch?v=" + r["id"]
         log(f"  ▶ [{r['score']}] {r['title']}  ({r.get('channel')})")
