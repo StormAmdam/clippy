@@ -308,13 +308,20 @@ def save_watchlist(items: list[str]) -> list[str]:
     return clean
 
 
+def all_niches() -> dict[str, list[str]]:
+    """The built-in topics plus the ones extensions add."""
+    from . import extensions
+    return {**NICHES, **extensions.finder_topics()}
+
+
 def scan(niches: list[str], keywords: str = "", window: str = "week", duration: str = "long", cc_only: bool = False,
          use_watchlist: bool = True, per_query: int = 25, enrich_top: int = 60, lang: str = "en",
          progress=lambda p, m: None, watchlist: list[str] | None = None, save_latest: bool = True) -> dict:
     """Run a full scan and save it as the latest leaderboard."""
     queries: list[tuple[str, str]] = []
+    topics = all_niches()
     for n in niches:
-        for q in NICHES.get(n, []):
+        for q in topics.get(n, []):
             queries.append((n, q))
     for kw in [k.strip() for k in (keywords or "").split(",") if k.strip()]:
         queries.append(("custom", kw))

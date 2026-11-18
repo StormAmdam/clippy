@@ -29,7 +29,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--min", dest="min_seconds", type=int, help="min clip length in seconds (default 20)")
     ap.add_argument("--max", dest="max_seconds", type=int, help="max clip length in seconds (default 60)")
     ap.add_argument("--color", dest="highlight_color", help="highlight colour, e.g. '#FFE135'")
-    ap.add_argument("--style", dest="caption_style", choices=["beast", "hormozi", "box", "clean"], help="caption style")
+    ap.add_argument("--style", dest="caption_style", help="caption style: beast, hormozi, box, clean, or one an "
+                                                          "extension adds")
+    ap.add_argument("--top", dest="top_theme", nargs="?", const="funny", metavar="THEME",
+                    help="make one Top countdown short instead (funny, crazy, shocking, wholesome…)")
+    ap.add_argument("--top-count", type=int, help="moments in the countdown (default 3)")
     ap.add_argument("--no-title", action="store_true", help="no hook title at the top")
     ap.add_argument("--no-sfx", action="store_true", help="no whoosh/pop sound effects")
     ap.add_argument("--no-motion", action="store_true", help="no zoom/slam/punch animations")
@@ -48,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
 
     ov = {"clips": a.clips, "min_seconds": a.min_seconds, "max_seconds": a.max_seconds,
           "highlight_color": a.highlight_color, "reuse_picks": a.reuse, "caption_style": a.caption_style}
+    if a.top_theme:
+        ov.update(format="top", top_theme=a.top_theme, top_count=a.top_count)
     for flag, key in (("no_sfx", "sfx"), ("no_motion", "motion"), ("no_teaser", "teaser")):
         if getattr(a, flag):
             ov[key] = False
@@ -83,7 +89,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n✗ {e}")
         return 1
     root = config.output_root(config.load())
-    print(f"\n\n✓ {len(res['clips'])} clips in {res['seconds'] // 60}m{res['seconds'] % 60:02d}s → {root / res['id'] / 'clips'}\n")
+    where = (root / res["clips"][0]["file"]).parent if res["clips"] else root / res["id"]
+    what = "countdown" if res["clips"] and res["clips"][0].get("format") == "top" else f"{len(res['clips'])} clips"
+    print(f"\n\n✓ {what} in {res['seconds'] // 60}m{res['seconds'] % 60:02d}s → {where}\n")
     for c in res["clips"]:
         print(f"  [{c['score']}] {c['title']}  ({c['duration']:.0f}s)")
         print(f"      {root / c['file']}")

@@ -63,6 +63,8 @@ const ICONS = {
   gamepad: '<line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>',
   power: '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
   stop: '<rect width="14" height="14" x="5" y="5" rx="2"/>',
+  puzzle: '<path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/>',
+  code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
 };
 const icon = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ""}</svg>`;
 function hydrateIcons(root = document) { $$("[data-icon]", root).forEach((el) => { el.innerHTML = icon(el.dataset.icon); el.removeAttribute("data-icon"); }); }
@@ -114,7 +116,15 @@ const NICHES = {
 };
 const nicheLabel = (n) => ({"tech & ai": "Tech & AI"}[n] || n[0].toUpperCase() + n.slice(1));
 const nicheIcon = (n) => icon((NICHES[n] || ["film"])[0]);
-const STYLES = [["beast", "Beast", "Comic, bouncy, tilted"], ["hormozi", "Hormozi", "Bold, colored keywords"], ["box", "Box", "Highlight box"], ["clean", "Clean", "Calm and minimal"]];
+// caption styles and countdown themes: the built-in ones, then what extensions add (loadLooks)
+let STYLES = [["beast", "Beast", "Comic, bouncy, tilted", "/static/styles/beast.jpg"], ["hormozi", "Hormozi", "Bold, colored keywords", "/static/styles/hormozi.jpg"],
+  ["box", "Box", "Highlight box", "/static/styles/box.jpg"], ["clean", "Clean", "Calm and minimal", "/static/styles/clean.jpg"]];
+let THEMES = [{id: "funny", name: "Funniest", emoji: "😂"}, {id: "crazy", name: "Craziest", emoji: "🤯"}, {id: "shocking", name: "Most shocking", emoji: "😱"}, {id: "wholesome", name: "Most wholesome", emoji: "🥹"}];
+async function loadLooks() {
+  try { STYLES = (await api.get("/api/styles")).map((x) => [x.id, x.name, x.about, x.preview || ""]); } catch {}
+  try { THEMES = await api.get("/api/top-themes"); } catch {}
+}
+const stylePic = (pv, name) => pv ? `<img src="${esc(pv)}" alt="" width="360" height="640" loading="lazy">` : `<div class="nopic"><b>${esc(name)}</b></div>`;
 const COLORS = ["#ffe135", "#3dff7a", "#ff4fd8", "#3ad8ff", "#ff8a1f", "#ffffff"];
 const LANGS = [["en", "English"], ["no", "Norwegian"], ["es", "Spanish"], ["de", "German"], ["fr", "French"], ["pt", "Portuguese"], ["any", "Any language"]];
 
@@ -167,7 +177,7 @@ let timers = [], leaveGuard = null, lastHash = location.hash;
 const repeat = (ms, fn) => timers.push(setInterval(fn, ms));
 const params = () => new URLSearchParams(location.hash.split("?")[1] || "");
 function setParam(k, v) { const p = params(); p.set(k, v); history.replaceState(null, "", `${location.hash.split("?")[0]}?${p}`); lastHash = location.hash; }
-const TITLES = {home: "Home", make: "Make Clips", find: "Find Videos", auto: "Autopilot", review: "Review", library: "Library", ai: "AI & Tools", settings: "Settings"};
+const TITLES = {home: "Home", make: "Make Clips", find: "Find Videos", auto: "Autopilot", review: "Review", library: "Library", ai: "AI & Tools", ext: "Extensions", settings: "Settings"};
 async function route() {
   let name = (location.hash.slice(1) || "home").split("?")[0];
   if (name === "autopilot") name = "auto";
@@ -266,7 +276,7 @@ pages.home = async (el) => {
   el.innerHTML = `
     <div class="ph"><div><h1>${hello}</h1><p>What's waiting for you, and what Clippy is working on.</p></div></div>
     <div id="hSetup"></div>
-    <nav class="mob-links" aria-label="More"><a class="btn sm" href="#library">${icon("grid")} Library</a><a class="btn sm" href="#ai">${icon("cpu")} AI &amp; Tools</a><a class="btn sm" href="#settings">${icon("sliders")} Settings</a></nav>
+    <nav class="mob-links" aria-label="More"><a class="btn sm" href="#library">${icon("grid")} Library</a><a class="btn sm" href="#ai">${icon("cpu")} AI &amp; Tools</a><a class="btn sm" href="#ext">${icon("puzzle")} Extensions</a><a class="btn sm" href="#settings">${icon("sliders")} Settings</a></nav>
     <form class="linkbar" id="hForm">
       <input class="input big" id="hUrl" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="YouTube link or video file" placeholder="https://www.youtube.com/watch?v=…">
       <button class="btn primary lg">${icon("scissors")} Make Clips</button></form>
@@ -358,7 +368,7 @@ pages.home = async (el) => {
 // ═════════════════════════ MAKE CLIPS ═════════════════════════
 const MAKE_DEFAULTS = {clips: 5, min_seconds: 20, max_seconds: 60, caption_style: "beast", highlight_color: "#ffe135", title_seconds: 3.5,
   teaser: true, sfx: true, motion: true, emojis: true, progress_bar: true, remove_silences: true, split_screen: true, punch_in: true, reuse_picks: false,
-  speech: "auto"};
+  speech: "auto", format: "clips", top_theme: "funny", top_count: 3};
 const SPEECH = [["auto", "Detect", "Clippy checks for talking itself"], ["on", "Has talking", "Podcasts, interviews, vlogs — picks by what's said"],
   ["off", "No talking", "Music, gameplay, sport, satisfying — picks by sound & action, skips transcription"]];
 const EFFECTS = [
@@ -378,23 +388,38 @@ const STAGE_IDX = {queued: 0, download: 0, transcribe: 1, pick: 2, render: 3, do
 pages.make = async (el) => {
   const o = {...MAKE_DEFAULTS, ...store.get("make", {})};
   el.innerHTML = `
-    <div class="ph"><div><h1>Make clips</h1><p>Paste a link. Clippy finds the best moments, reframes them to 9:16 and adds captions, effects and sound.</p></div></div>
-    <section class="panel">
+    <div class="ph"><div><h1>Make clips</h1><p>Paste a link or upload a video. Clippy finds the best moments, reframes them to 9:16 and adds captions, effects and sound.</p></div></div>
+    <section class="panel dropzone" id="mDrop">
       <form class="linkbar" id="mForm"><input class="input big" id="mUrl" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="YouTube link or video file" placeholder="https://www.youtube.com/watch?v=…">
-        <button class="btn primary lg" id="mGo">${icon("sparkles")} Make Clips</button></form>
-      <p class="small faint" style="margin:10px 0 0">A local file path works too. It takes a few minutes, and you can leave this page while it works.</p>
+        <button class="btn primary lg" id="mGo">${icon("sparkles")} Make Clips</button>
+        <button type="button" class="btn lg" id="mUp">${icon("upload")} Upload Video</button>
+        <input type="file" id="mFile" accept="video/*,.mkv,.mov,.avi,.m4v,.ts" hidden></form>
+      <p class="small faint" style="margin:10px 0 0">Or drag a video file here. It takes a few minutes, and you can leave this page while it works.</p>
+      <div class="drophint" aria-hidden="true">${icon("upload")}<b>Drop your video to make clips from it</b></div>
       <div id="mJob" style="margin-top:18px" class="hidden" aria-live="polite"></div>
     </section>
+    <div class="sec"><div class="sec-head"><h2>What to make</h2><span>Separate shorts, or one countdown</span></div>
+      <div class="choices wide" id="mFormat" role="radiogroup" aria-label="What to make">
+        ${[["clips", "film", "Shorts", "Several separate shorts, each from its own best moment"], ["top", "trophy", "Top countdown", "One short that ranks the best moments: #3, #2 and then #1"]].map(([v, ic, t, d]) =>
+          `<button type="button" role="radio" aria-checked="${o.format === v}" class="choice ${o.format === v ? "on" : ""}" data-v="${v}"><span class="tick">${icon("check")}</span><span class="ci">${icon(ic)}</span><b>${t}</b><small>${d}</small></button>`).join("")}</div>
+      <section class="panel ${o.format === "top" ? "" : "hidden"}" id="mTop" style="margin-top:12px">
+        <div class="field"><span id="mThemeLbl">Which moments</span><div class="chips" id="mThemes" role="radiogroup" aria-labelledby="mThemeLbl">${THEMES.map((t) =>
+          `<button type="button" role="radio" aria-checked="${o.top_theme === t.id}" class="chip ${o.top_theme === t.id ? "on" : ""}" data-t="${esc(t.id)}">${esc(t.emoji || "")} ${esc(t.name)}</button>`).join("")}</div></div>
+        <div class="field" style="margin-top:14px"><span id="mCountLbl">How many moments</span><div class="seg" id="mCount" role="radiogroup" aria-labelledby="mCountLbl">${[3, 4, 5].map((n) =>
+          `<button type="button" role="radio" aria-checked="${o.top_count === n}" class="${o.top_count === n ? "on" : ""}" data-n="${n}">${n}</button>`).join("")}</div>
+          <small class="hint" style="display:block;margin-top:8px">Each moment is 5–15 seconds, and the best one comes last. Extensions can add more kinds of countdown.</small></div>
+      </section></div>
     <div class="sec"><div class="sec-head"><h2>Caption style</h2><span>How your captions look</span></div>
-      <div class="styles" id="mStyles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d]) => `<button type="button" role="radio" aria-checked="${o.caption_style === k}" class="style ${o.caption_style === k ? "on" : ""}" data-s="${k}">
-        <img src="/static/styles/${k}.jpg" alt="" width="360" height="640"><div><b>${n}</b><small>${d}</small></div></button>`).join("")}</div></div>
+      <div class="styles" id="mStyles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d, pv]) => `<button type="button" role="radio" aria-checked="${o.caption_style === k}" class="style ${o.caption_style === k ? "on" : ""}" data-s="${esc(k)}">
+        ${stylePic(pv, n)}<div><b>${esc(n)}</b><small>${esc(d)}</small></div></button>`).join("")}</div></div>
     <div class="sec grid g2">
       <section class="panel"><h2>Clips</h2><p class="sub">How many, and how long</p>
+        <div id="mHowMany" class="${o.format === "top" ? "hidden" : ""}">
         <label class="field"><span>Number of clips: <b id="mNum" class="num" style="color:var(--ink)">${o.clips}</b></span><input type="range" id="mClips" min="1" max="12" value="${o.clips}"></label>
         <div class="grid g2" style="margin-top:14px">
           <label class="field"><span>Shortest (seconds)</span><input class="input num" type="number" inputmode="numeric" id="mMin" min="5" max="170" value="${o.min_seconds}"></label>
           <label class="field"><span>Longest (seconds)</span><input class="input num" type="number" inputmode="numeric" id="mMax" min="10" max="180" value="${o.max_seconds}"></label>
-        </div>
+        </div></div>
         <div class="field" style="margin-top:16px"><span id="speechLbl">Talking in the video</span>
           <div class="seg" id="mSpeech" role="radiogroup" aria-labelledby="speechLbl">${SPEECH.map(([v, l, d]) => `<button type="button" role="radio" aria-checked="${o.speech === v}" data-v="${v}" title="${esc(d)}" class="${o.speech === v ? "on" : ""}">${l}</button>`).join("")}</div>
           <small class="hint" id="mSpeechHint" style="display:block;margin-top:8px">${esc((SPEECH.find((x) => x[0] === o.speech) || SPEECH[0])[2])}</small></div>
@@ -411,6 +436,14 @@ pages.make = async (el) => {
     <div class="sec hidden" id="mResWrap"><div class="sec-head"><h2 id="mResTitle">Your clips</h2><span id="mResSub" class="break"></span></div><div class="clips" id="mRes"></div></div>`;
 
   const save = () => store.set("make", o);
+  if (!THEMES.some((t) => t.id === o.top_theme)) o.top_theme = "funny";        // its extension was removed
+  $$("#mFormat .choice").forEach((b) => b.onclick = () => {
+    o.format = b.dataset.v;
+    $$("#mFormat .choice").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); });
+    $("#mTop").classList.toggle("hidden", o.format !== "top"); $("#mHowMany").classList.toggle("hidden", o.format === "top"); save();
+  });
+  $$("#mThemes .chip").forEach((b) => b.onclick = () => { o.top_theme = b.dataset.t; $$("#mThemes .chip").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); }); save(); });
+  $$("#mCount button").forEach((b) => b.onclick = () => { o.top_count = +b.dataset.n; $$("#mCount button").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); }); save(); });
   $$("#mStyles .style").forEach((b) => b.onclick = () => { o.caption_style = b.dataset.s; $$("#mStyles .style").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); }); save(); });
   $("#mClips").oninput = (e) => { o.clips = +e.target.value; $("#mNum").textContent = o.clips; save(); };
   $("#mMin").onchange = (e) => { o.min_seconds = +e.target.value; save(); };
@@ -433,7 +466,7 @@ pages.make = async (el) => {
   const showResult = (res) => {
     state.lastResult = res;
     $("#mResWrap").classList.remove("hidden");
-    $("#mResTitle").textContent = `${res.clips.length} clips ready`;
+    $("#mResTitle").textContent = res.clips.length === 1 && res.clips[0].format === "top" ? "Your countdown is ready" : `${res.clips.length} clips ready`;
     $("#mResSub").textContent = res.title;
     $("#mRes").innerHTML = res.clips.map(clipCard).join("");
     bindCopy($("#mRes"));
@@ -459,11 +492,52 @@ pages.make = async (el) => {
       $("#mCancel", box)?.addEventListener("click", () => cancelJob(id));
       if (!live) {
         clearInterval(t); $("#mGo").disabled = false; state.makeJob = null;
-        if (j.state === "done") { showResult(j.result); toast(`${j.result.clips.length} clips ready`); refreshGlobal(); }
+        if (j.state === "done") { showResult(j.result); toast(j.result.clips[0]?.format === "top" ? "Countdown ready" : `${j.result.clips.length} clips ready`); refreshGlobal(); }
       }
     };
     const t = setInterval(tick, 1000); timers.push(t); tick();
   };
+  // ── upload a video from this computer: streamed into Clippy's folder, then made like a link
+  let xhr = null;
+  const upload = (file) => {
+    if (!file || xhr) return;
+    if (!/^video\//.test(file.type) && !/\.(mp4|mov|mkv|webm|avi|m4v|mpe?g|wmv|flv|ts|3gp)$/i.test(file.name)) { toast("That isn't a video file", "bad"); return; }
+    const box = $("#mJob"); box.classList.remove("hidden");
+    $("#mGo").disabled = $("#mUp").disabled = true;
+    const done = () => { xhr = null; if ($("#mGo")) $("#mGo").disabled = $("#mUp").disabled = false; };
+    const show = (pct, sent) => {
+      if (!$("#mJob")) return;
+      box.innerHTML = `<div class="bar"><i style="width:${(pct * 100).toFixed(1)}%"></i></div>
+        <div class="row between small" style="margin-top:8px"><span class="muted row break" style="gap:8px"><span class="dot live"></span>Uploading ${esc(file.name)}… ${fmtBytes(sent)} of ${fmtBytes(file.size)}</span>
+          <span class="row"><span class="muted num">${Math.round(pct * 100)}%</span><button type="button" class="btn sm quiet" id="mUpCancel">${icon("stop")} Cancel</button></span></div>`;
+      $("#mUpCancel").onclick = () => xhr && xhr.abort();
+    };
+    show(0, 0);
+    xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload?name=" + encodeURIComponent(file.name));
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) show(e.loaded / e.total, e.loaded); };
+    xhr.onabort = () => { done(); box.classList.add("hidden"); toast("Upload cancelled", "info"); };
+    xhr.onerror = () => { done(); box.classList.add("hidden"); fail(new Error("The upload didn't get through. Is Clippy still running?")); };
+    xhr.onload = async () => {
+      const status = xhr.status;
+      let r = {}; try { r = JSON.parse(xhr.responseText); } catch {}
+      done();
+      if (status !== 200) { box.classList.add("hidden"); fail(new Error(r.detail || "The upload failed")); return; }
+      $("#mUrl").value = "";
+      try { const j = await api.post("/api/jobs", {url: r.path, options: o}); watch(j.id); toast(`Uploaded “${r.title}”: making clips`); } catch (err) { fail(err); }
+    };
+    xhr.send(file);
+  };
+  $("#mUp").onclick = () => $("#mFile").click();
+  $("#mFile").onchange = (e) => { upload(e.target.files[0]); e.target.value = ""; };
+  const drop = $("#mDrop");
+  let depth = 0;
+  const hasFile = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+  drop.addEventListener("dragenter", (e) => { if (!hasFile(e)) return; e.preventDefault(); depth++; drop.classList.add("over"); });
+  drop.addEventListener("dragover", (e) => { if (hasFile(e)) e.preventDefault(); });
+  drop.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; drop.classList.remove("over"); } });
+  drop.addEventListener("drop", (e) => { if (!hasFile(e)) return; e.preventDefault(); depth = 0; drop.classList.remove("over"); upload(e.dataTransfer.files[0]); });
+
   $("#mForm").onsubmit = async (e) => {
     e.preventDefault();
     const url = $("#mUrl").value.trim();
@@ -786,7 +860,7 @@ function openWizard(existing) {
       $$("[data-rm]", b).forEach((x) => x.onclick = () => { p.sources.splice(+x.dataset.rm, 1); body(); });
     } else if (step === 3) {
       b.innerHTML = `<p class="wz-q">How should the shorts look?</p><p class="wz-help">Pick a caption style. You can change it any time.</p>
-        <div class="styles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d]) => `<button type="button" role="radio" aria-checked="${p.caption_style === k}" class="style ${p.caption_style === k ? "on" : ""}" data-s="${k}"><img src="/static/styles/${k}.jpg" alt="" width="360" height="640"><div><b>${n}</b><small>${d}</small></div></button>`).join("")}</div>
+        <div class="styles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d, pv]) => `<button type="button" role="radio" aria-checked="${p.caption_style === k}" class="style ${p.caption_style === k ? "on" : ""}" data-s="${esc(k)}">${stylePic(pv, n)}<div><b>${esc(n)}</b><small>${esc(d)}</small></div></button>`).join("")}</div>
         <div class="grid g2" style="margin-top:22px">
           <div class="field"><span>Highlight color</span><div class="swatches">${COLORS.map((c) => `<button type="button" class="swatch ${p.highlight_color === c ? "on" : ""}" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join("")}</div></div>
           <div class="field"><span>Shorts per run</span><div class="seg" id="wzClips">${[1, 2, 3, 5].map((n) => `<button type="button" data-v="${n}" class="${p.clips_per_video === n ? "on" : ""}">${n}</button>`).join("")}</div>
@@ -1085,6 +1159,69 @@ pages.ai = async (el) => {
   repeat(15000, load);
 };
 
+// ═════════════════════════ EXTENSIONS ═════════════════════════
+const MAKE_YOUR_OWN = "https://github.com/StormAmdam/clippy/blob/main/docs/extensions.md";
+pages.ext = async (el) => {
+  el.innerHTML = `<div class="ph"><div><h1>Extensions</h1><p>Caption styles, countdown themes, sound effects and more that other people made. They live in Clippy's folder, so uninstalling Clippy removes them too.</p></div>
+      <a class="btn quiet" href="${MAKE_YOUR_OWN}" target="_blank" rel="noopener">${icon("external")} Make Your Own</a></div>
+    <section class="panel"><h2>Installed</h2><p class="sub" id="xFolder">What you have, and whether it's switched on</p><div class="rows" id="xMine"></div></section>
+    <section class="panel"><h2>Community</h2><p class="sub">Made for Clippy and checked before they were listed</p>
+      <p class="small muted hidden" id="xNote" style="margin:10px 0 0"></p><div class="rows" id="xCat"><p class="small muted">Loading the community list…</p></div></section>
+    <section class="panel"><h2>Install from a link</h2><p class="sub">A GitHub repository or a link to a .zip file. Only install extensions from people you trust.</p>
+      <form class="row" id="xAdd" style="gap:8px;margin-top:12px"><input class="input" id="xUrl" type="url" autocomplete="off" spellcheck="false" aria-label="Link to an extension" placeholder="https://github.com/someone/their-clippy-extension"><button class="btn">${icon("download")} Install</button></form></section>`;
+  const adds = (a) => (a || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("");
+  const meta = (x) => [x.version && "v" + x.version, x.author && "by " + x.author].filter(Boolean).join(" · ");
+  const codeTag = (on) => on ? `<span class="tag you">${icon("code")} Runs code</span>` : "";
+  const after = async (msg) => { state.niches = null; await loadLooks(); toast(msg); await draw(); };   // new topics, looks, themes
+  const draw = async () => {
+    let mine; try { mine = await api.get("/api/extensions"); } catch (e) { $("#xMine").innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    $("#xFolder").textContent = `In ${mine.folder}`;
+    $("#xMine").innerHTML = mine.installed.length ? mine.installed.map((x) => `<div class="rowi model"><div class="ic ${x.enabled ? "ok" : ""}">${icon("puzzle")}</div>
+      <div class="t"><b>${esc(x.name)} <span class="small muted" style="font-weight:400">${esc(meta(x))}</span></b>
+        <small>${x.error ? `<span class="err-text">${esc(x.error)}</span>` : esc(x.description)}</small><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${codeTag(x.code)}${adds(x.adds)}</div></div>
+      <div class="acts row" style="gap:8px">${x.error ? "" : `<label class="switch" style="padding:6px 10px"><span class="txt"><small>${x.enabled ? "On" : "Off"}</small></span><input type="checkbox" data-on="${esc(x.id)}" ${x.enabled ? "checked" : ""} aria-label="Switch ${esc(x.name)} on or off"></label>`}
+        <button type="button" class="btn sm quiet" data-rm="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">${icon("trash")}</button></div></div>`).join("")
+      : `<p class="small muted">None yet. Pick some from the community list below.</p>`;
+    $$("[data-on]", el).forEach((cb) => cb.onchange = async () => {
+      const x = mine.installed.find((r) => r.id === cb.dataset.on), on = cb.checked;
+      let trust = false;
+      if (on && x.code && !x.trusted) {
+        trust = await confirmDialog({title: "This extension runs its own code", danger: true, confirm: "Trust and Switch On",
+          body: `“${esc(x.name)}”${x.author ? ` by ${esc(x.author)}` : ""} can do anything on this computer, like any program you install. Only switch it on if you trust who made it.`});
+        if (!trust) { cb.checked = false; return; }
+      }
+      try { await api.post(`/api/extensions/${encodeURIComponent(x.id)}/enable`, {on, trust}); await after(on ? `${x.name} is on` : `${x.name} is off`); }
+      catch (e) { cb.checked = !on; fail(e); }
+    });
+    $$("[data-rm]", el).forEach((b) => b.onclick = async () => {
+      const x = mine.installed.find((r) => r.id === b.dataset.rm);
+      if (!await confirmDialog({title: `Remove ${esc(x.name)}?`, confirm: "Remove", danger: true, body: "You can install it again any time."})) return;
+      try { await api.del(`/api/extensions/${encodeURIComponent(x.id)}`); await after(`${x.name} removed`); } catch (e) { fail(e); }
+    });
+    let cat; try { cat = await api.get("/api/extensions/catalog"); } catch (e) { $("#xCat").innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    $("#xNote").textContent = cat.note || ""; $("#xNote").classList.toggle("hidden", !cat.note);
+    $("#xCat").innerHTML = cat.items.length ? cat.items.map((x) => `<div class="rowi model"><div class="ic">${icon("puzzle")}</div>
+      <div class="t"><b>${esc(x.name)} <span class="small muted" style="font-weight:400">${esc(meta(x))}</span></b>
+        <small>${esc(x.description)}</small><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${codeTag(x.code)}${adds(x.adds)}</div></div>
+      <div class="acts">${x.installed && !x.update ? `<span class="tag ok">${icon("check")} Installed</span>`
+        : `<button type="button" class="btn sm ${x.update ? "" : "primary"}" data-get="${esc(x.id)}">${icon("download")} ${x.update ? "Update" : "Install"}</button>`}</div></div>`).join("")
+      : `<p class="small muted">The community list is empty right now.</p>`;
+    $$("[data-get]", el).forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      try { const r = await api.post("/api/extensions/install", {id: b.dataset.get}); await after(r.code && !r.enabled ? `Installed ${r.name}. It runs code, so switch it on when you trust it.` : `Installed ${r.name}`); }
+      catch (e) { b.disabled = false; fail(e); }
+    });
+  };
+  $("#xAdd").onsubmit = async (e) => {
+    e.preventDefault();
+    const url = $("#xUrl").value.trim(); if (!url) return;
+    const btn = $("#xAdd button"); btn.disabled = true;
+    try { const r = await api.post("/api/extensions/install", {url}); $("#xUrl").value = ""; await after(r.code && !r.enabled ? `Installed ${r.name}. It runs code, so switch it on when you trust it.` : `Installed ${r.name}`); }
+    catch (err) { fail(err); } finally { btn.disabled = false; }
+  };
+  await draw();
+};
+
 // ═════════════════════════ SETTINGS ═════════════════════════
 pages.settings = async (el) => {
   const [s, auto] = await Promise.all([api.get("/api/settings"), api.get("/api/autostart").catch(() => ({supported: false}))]);
@@ -1114,7 +1251,7 @@ pages.settings = async (el) => {
             <label class="field"><span>Clips per video</span><input class="input num" type="number" inputmode="numeric" min="1" max="12" data-k="clips" value="${s.clips}"></label>
             <label class="field"><span>Shortest (seconds)</span><input class="input num" type="number" inputmode="numeric" min="5" max="170" data-k="min_seconds" value="${s.min_seconds}"></label>
             <label class="field"><span>Longest (seconds)</span><input class="input num" type="number" inputmode="numeric" min="10" max="180" data-k="max_seconds" value="${s.max_seconds}"></label></div>
-          <div class="grid g2"><label class="field"><span>Caption style</span>${sel("caption_style", s.caption_style, STYLES.map(([k, n]) => [k, n]))}</label>
+          <div class="grid g2"><label class="field"><span>Caption style</span>${sel("caption_style", s.caption_style, STYLES.map(([k, n]) => [k, esc(n)]))}</label>
             <label class="field"><span>Download quality</span>${sel("max_height", s.max_height, [[1080, "1080p (smaller files)"], [1440, "1440p (recommended)"], [2160, "4K (sharpest, big files)"]])}</label></div>
           <label class="switch"><span class="ic">${icon("music")}</span><span class="txt"><b>Voice polish</b><small>Trims low rumble and evens out loudness so voices sound clear on phones</small></span><input type="checkbox" data-k="voice_polish" ${s.voice_polish ? "checked" : ""}></label></div></div>
       <div class="set"><div><b>Storage</b><p>Downloaded videos take the most space and are only needed to re-edit.</p></div>
@@ -1181,4 +1318,4 @@ pages.settings = async (el) => {
 hydrateIcons();
 refreshGlobal();
 const globalTimer = setInterval(refreshGlobal, 5000);
-route();
+loadLooks().finally(route);

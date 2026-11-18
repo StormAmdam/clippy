@@ -61,6 +61,17 @@ jobs:
           "Clippy.exe started the app on port $port; its folder: $($s.folder); still needs: $($s.missing -join ', ')"
           if ($s.folder -ne $dir) { throw "The app isn't using its own folder" }
 
+          "--- Extensions: the community list comes with the app, and installing one works"
+          $cat = Invoke-RestMethod "http://127.0.0.1:$port/api/extensions/catalog"
+          "Community list ($($cat.source)): $(($cat.items | ForEach-Object { $_.id }) -join ', ')"
+          if ($cat.items.Count -lt 1) { throw "The community list is empty" }
+          $x = Invoke-RestMethod -Method Post "http://127.0.0.1:$port/api/extensions/install" -ContentType "application/json" -Body '{"id": "extra-caption-styles"}'
+          if (-not $x.enabled) { throw "Installing an extension didn't switch it on" }
+          $styles = (Invoke-RestMethod "http://127.0.0.1:$port/api/styles") | ForEach-Object { $_.id }
+          if ($styles -notcontains "pop") { throw "The extension's caption style isn't offered: $($styles -join ', ')" }
+          if (-not (Test-Path "$dir\extensions\extra-caption-styles\extension.json")) { throw "The extension isn't in the app's folder" }
+          "Installed an extension into $dir\extensions; its caption styles are offered"
+
           "--- Starting Clippy.exe again only opens the window"
           Start-Process "$dir\Clippy.exe"
           Start-Sleep 15

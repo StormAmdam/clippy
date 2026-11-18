@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import config
+from . import config, extensions
 from .download import cached_info, download, have_tools, install_hint, probe, video_stream_info
 from .highlights import has_speech, pick_visual_clips, speech_stats
 from .picker import pick_clips
@@ -24,6 +24,10 @@ STAGES = [("download", 0.10), ("transcribe", 0.25), ("pick", 0.20), ("render", 0
 def _slug(t: str) -> str:
     s = re.sub(r"[^\w\s-]", "", t.lower(), flags=re.U)
     return re.sub(r"[\s_-]+", "-", s).strip("-")[:40] or "clip"
+
+
+def _looks_like_a_file(url: str) -> bool:
+    return bool(re.match(r"^([A-Za-z]:[\\/]|[\\/]|~|\.\.?[\\/])", url)) and "://" not in url
 
 
 class Progress:
@@ -43,6 +47,9 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
         on_info=None) -> dict:
     cfg = config.load(overrides)
     local = Path(url.strip()).expanduser().exists()
+    if not local and _looks_like_a_file(url.strip()):
+        raise RuntimeError(f"Clippy can't find the video file {url.strip()} anymore. "
+                           "If it was uploaded, upload it again.")
     if missing := [t for t in have_tools() if not (t == "yt-dlp" and local)]:
         raise RuntimeError(f"Clippy's video tools ({', '.join(missing)}) aren't set up yet. {install_hint()}")
     reuse = bool((overrides or {}).get("reuse_picks"))
@@ -82,13 +89,22 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
         log(f"  no real talking found ({n} words, {cover:.0%} speech) → picking clips from sound, action and replays")
 
     p = pr.stage("pick")
-    picks_file = workdir / "picks.json"
+    countdown = cfg.format == "top"
+    picks_file = workdir / ("picks-top.json" if countdown else "picks.json")
     if reuse and picks_file.exists():
         clips = json.loads(picks_file.read_text(encoding="utf-8"))
         visual = bool(clips) and all(c.get("mode") == "visual" for c in clips)
         p(1, "Reusing previous picks")
     else:
-        if visual:
+        if countdown:
+            from . import top
+            if visual:
+                many = dataclasses.replace(cfg, clips=max(cfg.top_count * 2, 4), min_seconds=cfg.top_min,
+                                           max_seconds=cfg.top_max)
+                clips = [top.from_visual(cfg, pick_visual_clips(many, info, src, vinfo, env, progress=p, log=log))]
+            else:
+                clips = [top.pick_top(cfg, info, tr, progress=p, log=log, env=env)]
+        elif visual:
             clips = pick_visual_clips(cfg, info, src, vinfo, env, progress=p, log=log)
         else:
             clips = pick_clips(cfg, info, tr, progress=p, log=log, env=env)
@@ -98,9 +114,12 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
     rcfg = dataclasses.replace(cfg, voice_polish=False, remove_silences=False,
                                title_seconds=-1 if cfg.title_seconds != 0 else 0) if visual else cfg
     words = [] if visual else tr["words"]
+    if countdown:
+        rcfg = dataclasses.replace(rcfg, teaser=False)   # the countdown's own build-up does that job
 
     p = pr.stage("render")
-    out_dir = workdir / re.sub(r"[^\w-]", "", str((overrides or {}).get("clips_dir") or "clips"))
+    out_dir = workdir / re.sub(r"[^\w-]", "", str((overrides or {}).get("clips_dir") or
+                                                   ("clips-top" if countdown else "clips")))
     out_dir.mkdir(exist_ok=True)
     for old in out_dir.glob("*"):
         if old.is_file():
@@ -111,20 +130,34 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
                                    "(a video player, perhaps). Close it and try again.") from None
     results = []
     for i, clip in enumerate(clips):
-        name = f"{i + 1:02d}-{_slug(clip.get('title') or 'clip')}.mp4"
+        name = f"{_slug(clip.get('title') or 'top')}.mp4" if countdown else \
+            f"{i + 1:02d}-{_slug(clip.get('title') or 'clip')}.mp4"
         out = out_dir / name
         log(f"  rendering {name}")
         sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
         stats = render_clip(rcfg, src, vinfo, clip, words, env, out, progress=sub, log=log)
+        extra = {"format": "top", "ranks": [{"rank": s["rank"], "label": s["label"], "start": s["start"],
+                                            "end": s["end"]} for s in clip["segments"]]} if clip.get("segments") else {}
         results.append({**{k: clip.get(k) for k in ("title", "caption", "hashtags", "score", "why", "start", "end")},
-                        **stats, "file": str(out.relative_to(config.output_root(cfg))),
+                        **stats, **extra, "file": str(out.relative_to(config.output_root(cfg))),
                         "thumb": str(out.with_suffix(".jpg").relative_to(config.output_root(cfg)))})
+        extensions.run_hook("clip_rendered", log=log, path=out, clip=dict(results[-1]), video=dict(info))
 
     summary = {"id": info["id"], "title": info["title"], "url": info.get("webpage_url", url),
                "uploader": info.get("uploader", ""), "language": tr.get("language"),
                "mode": "visual" if visual else "speech",
                "transcribed_on": tr.get("device"), "created": int(time.time()),
                "seconds": round(time.time() - t_start), "clips": results}
-    config.write_atomic(workdir / "result.json", json.dumps(summary, ensure_ascii=False, indent=2))
+    # the Library shows every short of this video: keep earlier ones from other folders (countdown, Autopilot…)
+    root, mine = config.output_root(cfg), out_dir.relative_to(config.output_root(cfg)).as_posix() + "/"
+    try:
+        earlier = json.loads((workdir / "result.json").read_text(encoding="utf-8")).get("clips") or []
+    except (OSError, ValueError, AttributeError):
+        earlier = []
+    kept = [c for c in earlier if isinstance(c, dict) and not str(c.get("file", "")).replace("\\", "/").startswith(mine)
+            and (root / str(c.get("file", ""))).is_file()]
+    config.write_atomic(workdir / "result.json",
+                        json.dumps({**summary, "clips": results + kept}, ensure_ascii=False, indent=2))
+    extensions.run_hook("video_done", log=log, result=dict(summary), folder=workdir)
     on_progress("done", 1.0, f"{len(results)} clips ready")
     return summary

@@ -1,0 +1,13 @@
+{
+  "id": "more-topics",
+  "name": "More Find Videos topics",
+  "version": "1.0.0",
+  "author": "Clippy",
+  "description": "Adds gaming, cooking, science and fitness to Find Videos.",
+  "finder_topics": {
+    "gaming": ["gaming podcast", "gaming highlights", "speedrun"],
+    "cooking": ["cooking show", "chef interview", "cooking challenge"],
+    "science": ["science explained", "science podcast", "astronaut interview"],
+    "fitness": ["fitness podcast", "bodybuilder interview", "workout challenge"]
+  }
+}

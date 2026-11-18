@@ -79,7 +79,7 @@ def _map_time(t: float, keeps_s: list[tuple[float, float]]) -> float:
 
 @dataclass
 class Part:
-    kind: str                   # "teaser" | "main"
+    kind: str                   # "teaser" | "main" | "moment" (one of a countdown's)
     start: float                # source seconds
     words: list
     shots: list
@@ -243,12 +243,16 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
     W, H = vinfo["width"], vinfo["height"]
     srcs = str(src)
 
-    # 1) parts: optional flash-forward teaser + the main clip
+    # 1) parts: optional flash-forward teaser + the main clip, or a countdown's moments (#3, #2, #1)
     specs = []
+    moments = clip.get("segments") or []
     tz = clip.get("teaser")
-    if cfg.teaser and tz and tz.get("end", 0) > tz.get("start", 0):
+    if moments:
+        specs = [("moment", m["start"], m["end"], words_all[m.get("i0", 0): m.get("i1", 0)]) for m in moments]
+    elif cfg.teaser and tz and tz.get("end", 0) > tz.get("start", 0):
         specs.append(("teaser", tz["start"], tz["end"], words_all[tz["i0"]: tz["i1"]]))
-    specs.append(("main", clip["start"], clip["end"], words_all[clip["i0"]: clip["i1"]]))
+    if not moments:
+        specs.append(("main", clip["start"], clip["end"], words_all[clip["i0"]: clip["i1"]]))
 
     parts: list[Part] = []
     for k, (kind, s, e, words) in enumerate(specs):
@@ -257,7 +261,7 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
         shots = analyze(srcs, s, n, fps, W, H, cfg.split_screen, fps_str=fps_str, no_captions=not words_all,
                         progress=lambda p, lo=lo, hi=hi: progress(0.2 * (lo + (hi - lo) * p), "Finding faces & camera cuts…"))
         n = shots[-1].f1
-        keeps = keep_intervals(words, s, n / fps, fps, env, cfg) if kind == "main" else [(0, n)]
+        keeps = keep_intervals(words, s, n / fps, fps, env, cfg) if kind != "teaser" else [(0, n)]
         parts.append(Part(kind, s, words, shots, keeps, n))
 
     out0 = 0
@@ -304,15 +308,17 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
         pi, (_, _, si, _) = flat[o]
         return layout_positions(parts[pi].shots[si], W, H, cfg.caption_y)
 
+    ranks = [{"t0": p.out0 / fps, "t1": (p.out0 + len(p.entries)) / fps, "rank": m.get("rank", 0),
+              "label": m.get("label", "")} for p, m in zip(parts, moments)]
     ov = Overlay(cfg, cap_words, out_dur, clip.get("title", ""), clip.get("emphasis", []),
-                 clip.get("emoji", []), layout_at)
+                 clip.get("emoji", []), layout_at, ranks=ranks or None)
 
     # zoom punches on AI key words (spaced out, away from cuts)
     emph = {re.sub(r"[^\w'$%]", "", e.lower()) for x in clip.get("emphasis", []) for e in str(x).split()}
     cut_frames = [s for s, _, kind in segs if kind != "start"]
     punches: list[int] = []
     if cfg.motion:
-        for w in cap_words[len(parts[0].words) if len(parts) > 1 else 0:]:
+        for w in cap_words[len(parts[0].words) if parts[0].kind == "teaser" else 0:]:
             if re.sub(r"[^\w'$%]", "", w["w"].lower()) not in emph:
                 continue
             o = int(w["s"] * fps)
@@ -321,11 +327,13 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
             if punches and o - punches[-1] < fps * 2.8:
                 continue
             punches.append(o)
-        if not punches and clip.get("beats"):  # no talking: punch on the music / impact hits instead
-            main_p = parts[-1]
-            for t in clip["beats"]:
+        beat_parts = ([(p, m.get("beats")) for p, m in zip(parts, moments)] if moments
+                      else [(parts[-1], clip.get("beats"))])
+        for main_p, beats in beat_parts if not punches else []:   # no talking: punch on music / impact hits
+            end = main_p.out0 + len(main_p.entries)
+            for t in beats or []:
                 o = main_p.out0 + int(round((t - main_p.start) * fps))
-                if not (main_p.out0 + fps * 1.0 <= o < n_out - fps * 0.5):
+                if not (main_p.out0 + fps * 1.0 <= o < end - fps * 0.5):
                     continue
                 if any(abs(o - c) < fps * 0.4 for c in cut_frames) or (punches and o - punches[-1] < fps * 2.8):
                     continue
@@ -342,6 +350,8 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
             ev.append((0.14, "whoosh", 0.3 * g))
         for b in boundaries:
             ev.append((b / fps, "whoosh", 0.6 * g))
+            if moments:                                  # the next rank slams in
+                ev.append((b / fps + 0.12, "impact", 0.36 * g))
         last = 0.0
         for s, _, kind in segs:
             ts = s / fps

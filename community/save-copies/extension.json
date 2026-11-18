@@ -1,0 +1,8 @@
+{
+  "id": "save-copies",
+  "name": "Save copies to Videos",
+  "version": "1.0.0",
+  "author": "Clippy",
+  "description": "Puts a copy of every finished short in your Videos folder (Videos/Clippy Shorts), named after its title. An example of an extension with code.",
+  "code": "main.py"
+}

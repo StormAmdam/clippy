@@ -50,6 +50,7 @@ Step "Clippy"
 Copy-Item -Recurse (Join-Path $Root "clippy") (Join-Path $App "clippy")
 Get-ChildItem (Join-Path $App "clippy") -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
 Copy-Item -Recurse (Join-Path $Root "fonts") (Join-Path $App "fonts")
+Copy-Item -Recurse (Join-Path $Root "community") (Join-Path $App "community")   # the community extensions list, offline
 New-Item -ItemType Directory -Force (Join-Path $App "models") | Out-Null
 Copy-Item (Join-Path $Root "models\face_detection_yunet_2023mar.onnx") (Join-Path $App "models")
 Copy-Item -Recurse (Join-Path $Root "LICENSES") (Join-Path $App "LICENSES")

@@ -39,6 +39,14 @@ def probe(url: str) -> dict:
     """Return basic info: id, title, duration, uploader. Works for URLs and local files."""
     p = Path(url).expanduser()
     if p.exists():
+        saved = p.parent / "info.json"                 # an uploaded video (clippy/uploads.py): its real name
+        if p.stem == "source" and saved.exists():
+            try:
+                info = json.loads(saved.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                info = None
+            if isinstance(info, dict) and info.get("uploaded") and info.get("id") == p.parent.name:
+                return {**info, "local_path": str(p.resolve())}
         dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)],
                              capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
         return {"id": "local-" + _slug(p.stem), "title": p.stem, "duration": float(dur or 0),

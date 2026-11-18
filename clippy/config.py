@@ -40,6 +40,11 @@ class Settings:
     clips: int = 5
     min_seconds: int = 20
     max_seconds: int = 60
+    format: str = "clips"                # clips = separate shorts | top = one countdown short ("Top 3 funniest")
+    top_theme: str = "funny"             # funny | crazy | shocking | wholesome | one an extension adds
+    top_count: int = 3                   # moments in a countdown
+    top_min: int = 5                     # seconds per moment
+    top_max: int = 15
 
     # ── Look
     caption_style: str = "beast"         # beast | hormozi | box | clean
@@ -150,7 +155,7 @@ def load(overrides: dict | None = None) -> Settings:
 
 # Clippy's own data folders inside output/. Everything else is a project (one per source video) —
 # note real YouTube ids can start with "_" or "-", so a name prefix can't tell them apart.
-INTERNAL_DIRS = frozenset({"_auto", "_finder"})
+INTERNAL_DIRS = frozenset({"_auto", "_finder", "_uploads"})
 
 
 def output_root(s: Settings) -> Path:

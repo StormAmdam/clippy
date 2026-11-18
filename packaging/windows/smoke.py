@@ -216,6 +216,56 @@ def test_clip(app: Path, api: str, video: Path, out: Path) -> None:
        f"“{clip['title']}”, {dur:.1f} s, 1080x1920 H.264 with sound, in {time.time() - t0:.0f} s")
 
 
+def test_upload_and_countdown(app: Path, api: str, video: Path, out: Path) -> None:
+    step("4. An uploaded video becomes a Top countdown")
+    import httpx
+
+    from clippy import config
+    t0 = time.time()
+    with open(video, "rb") as f:
+        r = httpx.post(f"{api}/api/upload", params={"name": video.name}, content=f, timeout=600)
+    if r.status_code != 200:
+        raise RuntimeError(f"Uploading failed: {r.text[:300]}")
+    up = r.json()
+    ok("The video uploaded into the app's folder", f"{up['id']}, “{up['title']}”, {time.time() - t0:.1f} s")
+    root = config.output_root(config.load())
+    work = root / up["id"]                              # the same fixed transcript as the clip test
+    local = next(d for d in root.iterdir() if d.name.startswith("local-") and (d / "transcript.json").exists())
+    for name in ("transcript.json", "envelope.npy"):
+        shutil.copy2(local / name, work / name)
+    opts = {"format": "top", "top_theme": "funny", "top_count": 3, "top_min": 5, "top_max": 12,
+            "caption_style": "box"}
+    jid = httpx.post(f"{api}/api/jobs", json={"url": up["path"], "options": opts}, timeout=30).json()["id"]
+    t0, last = time.time(), ""
+    while True:
+        job = httpx.get(f"{api}/api/jobs/{jid}", timeout=30).json()
+        if job["msg"] != last:
+            last = job["msg"]
+            print(f"  [{time.time() - t0:5.0f}s] {job['stage']}: {last}", flush=True)
+        if job["state"] in ("done", "error", "cancelled", "interrupted"):
+            break
+        if time.time() - t0 > 40 * 60:
+            raise RuntimeError("Making the countdown took more than 40 minutes")
+        time.sleep(3)
+    log = "\n".join(job.get("log") or [])
+    if job["state"] != "done" or "Traceback" in log:
+        raise RuntimeError(f"The countdown job ended as {job['state']}: {job.get('error')}\n{log[-4000:]}")
+    clip = job["result"]["clips"][0]
+    mp4 = root / clip["file"]
+    meta = ffprobe(mp4)
+    v = next(s for s in meta["streams"] if s["codec_type"] == "video")
+    dur = float(meta["format"]["duration"])
+    ranks = [r["rank"] for r in clip.get("ranks") or []]
+    if (v["width"], v["height"]) != (1080, 1920) or clip.get("format") != "top" or not ranks or ranks[-1] != 1:
+        raise RuntimeError(f"The countdown is wrong: {v['width']}x{v['height']}, ranks {ranks}, {clip.get('format')}")
+    shutil.copy2(mp4, out / "countdown.mp4")
+    for i, f in enumerate((0.1, 0.5, 0.9)):
+        run(["ffmpeg", "-v", "error", "-y", "-ss", f"{dur * f:.2f}", "-i", str(mp4), "-frames:v", "1",
+             "-vf", "scale=540:-2", str(out / f"countdown-{i + 1}.jpg")])
+    ok("The app made a Top countdown from the upload",
+       f"“{clip['title']}”: {', '.join('#%d %s' % (r['rank'], r['label']) for r in clip['ranks'])}, {dur:.1f} s")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--app", required=True, type=Path)
@@ -232,6 +282,7 @@ def main() -> int:
     video = make_video(app.parent)
     test_transcription(app, video)
     test_clip(app, a.api, video, a.out)
+    test_upload_and_countdown(app, a.api, video, a.out)
     print("\nSmoke test, part 2:")
     for name, detail in RESULTS:
         print(f"  OK  {name}: {detail}")

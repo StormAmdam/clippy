@@ -85,7 +85,7 @@ def save_profile(data: dict) -> dict:
         existing = next((p for p in profiles if p["id"] == pid), {})
         merged = {**PROFILE_DEFAULTS, **existing, **{k: v for k, v in data.items() if k in PROFILE_DEFAULTS}, "id": pid}
         merged["sources"] = _clean_channels(merged["sources"])
-        merged["niches"] = [n for n in merged["niches"] if n in finder.NICHES]
+        merged["niches"] = [n for n in merged["niches"] if n in finder.all_niches()]
         for k in ("videos_per_run", "clips_per_video", "min_seconds", "max_seconds"):
             merged[k] = max(1, int(merged[k]))
         merged["auto_every_hours"] = max(0.0, float(merged["auto_every_hours"]))

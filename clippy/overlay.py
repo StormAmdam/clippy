@@ -152,14 +152,21 @@ def make_chunks(words: list[Word], max_words: int, max_chars: int) -> list[list[
 
 class Overlay:
     def __init__(self, cfg: Settings, words: list[dict], duration: float, title: str, emphasis: list[str],
-                 emojis: list[dict], layout_at, style: str | None = None):
+                 emojis: list[dict], layout_at, style: str | dict | None = None, ranks: list[dict] | None = None):
         self.cfg = cfg
-        self.st = dict(STYLES.get(style or cfg.caption_style, STYLES["beast"]))
+        name = style or cfg.caption_style
+        if isinstance(name, dict):                       # a style given whole (tools/style_preview.py)
+            self.st = dict(name)
+        elif name in STYLES:
+            self.st = dict(STYLES[name])
+        else:                                            # a style from an extension (or one that's gone: Beast)
+            from . import extensions
+            self.st = dict(extensions.caption_styles().get(name) or STYLES["beast"])
         st = self.st
         if cfg.words_per_caption > 0:
             st["words"] = cfg.words_per_caption
         size = int(st["size"] * cfg.caption_scale)
-        self.font = ImageFont.truetype(str(FONTS / st["font"]), size)
+        self.font = ImageFont.truetype(st.get("font_path") or str(FONTS / st["font"]), size)
         self.size = size
         self.asc, self.desc = self.font.getmetrics()
         self.pad = st["stroke"] + st["shadow"] * 2 + int(size * 0.22)
@@ -220,11 +227,25 @@ class Overlay:
                     break
         self._emoji_cache: dict[str, np.ndarray | None] = {}
 
-        self.title_spr = None
-        self.title_y = layout_at(0.0)["title_y"]
-        if title and cfg.title_seconds != 0:
-            self.title_spr = self._render_title(title)
+        # title cards at the top: the hook title, or a countdown's intro title and then a rank card per moment
         self.title_end = duration if cfg.title_seconds < 0 else min(duration, cfg.title_seconds)
+        self.cards: list[tuple[float, float, np.ndarray, float, bool]] = []   # t0, t1, sprite, y, slides out
+        if ranks:
+            start = 0.0
+            if title and cfg.title_seconds != 0:
+                start = min(2.2, max(0.0, ranks[0]["t1"] - 1.5))
+                if start > 0.5:
+                    self.cards.append((0.0, start, self._render_title(title), layout_at(0.0)["title_y"], True))
+                else:
+                    start = 0.0
+            for r in ranks:
+                t0 = max(r["t0"], start)
+                if r["t1"] - t0 > 0.3:
+                    self.cards.append((t0, r["t1"], self._render_rank(int(r["rank"]), str(r["label"] or "")),
+                                       layout_at(t0)["title_y"], r["t1"] < duration - 0.05))
+        elif title and cfg.title_seconds != 0:
+            self.cards.append((0.0, self.title_end, self._render_title(title), layout_at(0.0)["title_y"],
+                               cfg.title_seconds > 0))
 
     # ── text layout & sprites
     def _layout(self, texts: list[str]):
@@ -351,6 +372,37 @@ class Overlay:
         return spr
 
     def _render_title(self, title: str) -> np.ndarray:
+        img = self._title_image(title)
+        if self.st["title"] == "beast":
+            img = img.rotate(-2.5, resample=Image.BICUBIC, expand=False)
+        return _to_premul(img)
+
+    def _render_rank(self, rank: int, label: str) -> np.ndarray:
+        """A countdown's rank card: a big "#3" over the moment's label (#1 a bit bigger)."""
+        size = int((175 if rank == 1 else 150) * self.cfg.title_scale)
+        font = ImageFont.truetype(str(FONTS / "LuckiestGuy-Regular.ttf"), size)
+        text = f"#{rank}"
+        l0, t0, r0, b0 = font.getbbox(text, anchor="la")
+        nw, nh = int(r0 - l0 + 80), int(b0 - t0 + 70)
+        num = Image.new("RGBA", (nw, nh), (0, 0, 0, 0))
+        sh = Image.new("L", num.size, 0)
+        ImageDraw.Draw(sh).text((40 - l0, 30 - t0), text, font=font, fill=255, stroke_width=14)
+        sh = sh.filter(ImageFilter.GaussianBlur(10))
+        shadow = Image.new("RGBA", num.size, (0, 0, 0, 0))
+        shadow.putalpha(sh.point(lambda v: int(v * 0.85)))
+        num.alpha_composite(shadow, (0, 8))
+        ImageDraw.Draw(num).text((40 - l0, 30 - t0), text, font=font, fill=self.hi + (255,), stroke_width=13,
+                                 stroke_fill=(0, 0, 0, 255))
+        lab = self._title_image(label) if label.strip() else Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+        W = max(num.width, lab.width)
+        canvas = Image.new("RGBA", (W, num.height + lab.height - 30), (0, 0, 0, 0))
+        canvas.alpha_composite(num, ((W - num.width) // 2, 0))
+        canvas.alpha_composite(lab, ((W - lab.width) // 2, num.height - 30))
+        if self.st["title"] == "beast":
+            canvas = canvas.rotate(-2.5, resample=Image.BICUBIC, expand=False)
+        return _to_premul(canvas)
+
+    def _title_image(self, title: str) -> Image.Image:
         beast = self.st["title"] == "beast"
         size = int((96 if beast else 72) * self.cfg.title_scale)
         font = ImageFont.truetype(str(FONTS / ("LuckiestGuy-Regular.ttf" if beast else "Montserrat-ExtraBold.ttf")), size)
@@ -399,9 +451,7 @@ class Overlay:
                 d.rounded_rectangle(box, radius=int(size * 0.28), fill=(255, 255, 255, 255))
                 d.text((x, y + pady), l, font=font, fill=(16, 16, 16, 255))
             y += lh + pady * 2 - (int(size * 0.12) if not beast else int(size * 0.25))
-        if beast:
-            canvas = canvas.rotate(-2.5, resample=Image.BICUBIC, expand=False)
-        return _to_premul(canvas)
+        return canvas
 
     # ── per frame
     def _chunk_at(self, t: float) -> Chunk | None:
@@ -418,19 +468,23 @@ class Overlay:
 
     def draw(self, frame: np.ndarray, t: float) -> None:
         st = self.st
-        # hook title: slides down with a bounce, slides back up at the end
-        if self.title_spr is not None and t < self.title_end:
-            tin = t / 0.4
+        # title cards: slide down with a bounce, slide back up at the end
+        for t0, t1, spr, ty, slides_out in self.cards:
+            if not t0 <= t < t1:
+                continue
+            since = t - t0
+            tin = since / 0.4
             k = ease_out_back(tin, 1.6) if tin < 1 else 1.0
-            out = (t - (self.title_end - 0.28)) / 0.28 if self.cfg.title_seconds > 0 else -1
-            y = self.title_y + self.title_spr.shape[0] / 2 - 30
+            out = (t - (t1 - 0.28)) / 0.28 if slides_out else -1
+            y = ty + spr.shape[0] / 2 - 30
             y += (1 - k) * -160
-            a = min(1.0, t / 0.15)
+            a = min(1.0, since / 0.15)
             sc = 0.85 + 0.15 * k
             if out > 0:
                 a *= 1 - ease_out_cubic(out)
                 y -= 90 * ease_out_cubic(out)
-            blit(frame, self.title_spr, OUT_W / 2, y, sc, a)
+            blit(frame, spr, OUT_W / 2, y, sc, a)
+            break
 
         c = self._chunk_at(t)
         if c is not None:

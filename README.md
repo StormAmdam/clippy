@@ -21,7 +21,7 @@ The only settings changed: 3 clips, 15–40 s each.</sub>
 
 ## What you get
 
-Paste a YouTube link (or drop in a video file) and Clippy:
+Paste a YouTube link, or upload a video from your computer (drag it onto the page), and Clippy:
 
 1. **finds the moments worth posting.** Whisper transcribes the video, then a local LLM reads the whole thing,
    picks the strongest stories and tightens each clip so it opens on a hook and ends on the payoff.
@@ -34,6 +34,14 @@ Paste a YouTube link (or drop in a video file) and Clippy:
 
 Music, gameplay and sports videos work too. Without speech, Clippy picks moments from the sound, the replay graph
 and the picture instead.
+
+**Top countdowns.** Instead of separate shorts, Clippy can make one short that ranks a video's best moments of a
+kind, #3, #2 and then #1, each with a big rank card: the funniest, craziest, most shocking or most wholesome moments.
+For the funniest, laughter and loud reactions count too. Extensions add more kinds.
+
+**Extensions.** The Extensions page installs caption styles, countdown themes, sound effects and Find Videos topics
+that other people made, from the community list or a link. Extensions with code stay off until you say you trust
+them. [Make your own](docs/extensions.md).
 
 ## Install
 
@@ -190,6 +198,7 @@ llama.cpp option in setup) avoids all this and uses the same graphics card.
 ./clippy.sh "https://youtu.be/…" --no-sfx --no-teaser                    # calmer edit
 ./clippy.sh "https://youtu.be/…" --no-talking                            # music / gameplay / sport: skip Whisper
 ./clippy.sh ~/Videos/my-video.mp4    # local files work too
+./clippy.sh "https://youtu.be/…" --top funny            # one Top 3 countdown (crazy, shocking, wholesome…)
 ./clippy.sh auto all                 # run every Autopilot channel now (results go to Review)
 ./clippy.sh ai                       # which AI servers and models Clippy can see, and which it will use
 ./clippy.sh ai test                  # send the AI a real request and time it

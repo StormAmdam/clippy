@@ -1,0 +1,36 @@
+{
+  "id": "extra-caption-styles",
+  "name": "Extra caption styles",
+  "version": "1.0.0",
+  "author": "Clippy",
+  "description": "Two more caption looks: Pop shows one huge word at a time, Subtitle reads like calm film subtitles.",
+  "caption_styles": [
+    {
+      "id": "pop",
+      "name": "Pop",
+      "about": "One huge word at a time",
+      "base": "beast",
+      "size": 150,
+      "words": 1,
+      "tilt": 4,
+      "pop": 1.3,
+      "rest": 1.0,
+      "preview": "pop.jpg"
+    },
+    {
+      "id": "subtitle",
+      "name": "Subtitle",
+      "about": "Like film subtitles",
+      "base": "clean",
+      "size": 64,
+      "upper": false,
+      "words": 7,
+      "stroke": 6,
+      "shadow": 8,
+      "pop": 1.0,
+      "rest": 1.0,
+      "emph_always": false,
+      "preview": "subtitle.jpg"
+    }
+  ]
+}

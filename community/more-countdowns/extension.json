@@ -1,0 +1,47 @@
+{
+  "id": "more-countdowns",
+  "name": "More countdowns",
+  "version": "1.0.0",
+  "author": "Clippy",
+  "description": "Four more kinds of Top countdown: most awkward, best comebacks, most relatable and most inspiring moments.",
+  "countdown_themes": [
+    {
+      "id": "awkward",
+      "name": "Most awkward",
+      "emoji": "😬",
+      "title": "Top {n} Most Awkward Moments",
+      "word": "awkward",
+      "look_for": "the most awkward moments: uncomfortable silences, cringe questions, people saying the wrong thing, things that make viewers want to look away",
+      "hashtags": ["#awkward", "#cringe", "#awkwardmoments"],
+      "laughter": true
+    },
+    {
+      "id": "comebacks",
+      "name": "Best comebacks",
+      "emoji": "🔥",
+      "title": "Top {n} Best Comebacks",
+      "word": "savage",
+      "look_for": "the best comebacks and roasts: quick, witty or savage replies that shut someone down",
+      "hashtags": ["#comeback", "#savage", "#roast"],
+      "laughter": true
+    },
+    {
+      "id": "relatable",
+      "name": "Most relatable",
+      "emoji": "🙋",
+      "title": "Top {n} Most Relatable Moments",
+      "word": "relatable",
+      "look_for": "the most relatable moments: everyday struggles, honest confessions and \"that's so me\" situations most viewers have lived through",
+      "hashtags": ["#relatable", "#thatsme", "#reallife"]
+    },
+    {
+      "id": "inspiring",
+      "name": "Most inspiring",
+      "emoji": "💪",
+      "title": "Top {n} Most Inspiring Moments",
+      "word": "inspiring",
+      "look_for": "the most inspiring moments: hard-won lessons, comeback stories and lines that make people want to go and do something",
+      "hashtags": ["#motivation", "#inspiration", "#mindset"]
+    }
+  ]
+}

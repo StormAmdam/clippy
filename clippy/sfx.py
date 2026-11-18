@@ -102,9 +102,17 @@ def _decode(path: Path) -> np.ndarray | None:
 
 @functools.cache
 def _user_files(name: str) -> tuple[Path, ...]:
-    if not USER_DIR.exists():
-        return ()
-    return tuple(sorted(p for p in USER_DIR.glob(f"{name}*") if p.suffix.lower() in (".wav", ".mp3", ".ogg", ".flac", ".m4a")))
+    """Your own sounds in sfx/, then the ones switched-on extensions bring."""
+    from . import extensions
+    kinds = (".wav", ".mp3", ".ogg", ".flac", ".m4a")
+    mine = sorted(p for p in USER_DIR.glob(f"{name}*") if p.suffix.lower() in kinds) if USER_DIR.exists() else []
+    return tuple(mine or extensions.sounds(name))
+
+
+def forget_user_sounds() -> None:
+    """Extensions changed: look for sound files again."""
+    _user_files.cache_clear()
+    _cached.cache_clear()
 
 
 @functools.cache

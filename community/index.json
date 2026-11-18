@@ -1,0 +1,62 @@
+{
+  "about": "The community list of Clippy extensions. Add yours: see docs/extensions.md.",
+  "extensions": [
+    {
+      "id": "extra-caption-styles",
+      "name": "Extra caption styles",
+      "description": "Two more caption looks: Pop shows one huge word at a time, Subtitle reads like calm film subtitles.",
+      "author": "Clippy",
+      "version": "1.0.0",
+      "adds": [
+        "2 caption styles"
+      ],
+      "code": false,
+      "files": [
+        "extension.json",
+        "pop.jpg",
+        "subtitle.jpg"
+      ]
+    },
+    {
+      "id": "more-countdowns",
+      "name": "More countdowns",
+      "description": "Four more kinds of Top countdown: most awkward, best comebacks, most relatable and most inspiring moments.",
+      "author": "Clippy",
+      "version": "1.0.0",
+      "adds": [
+        "4 countdown themes"
+      ],
+      "code": false,
+      "files": [
+        "extension.json"
+      ]
+    },
+    {
+      "id": "more-topics",
+      "name": "More Find Videos topics",
+      "description": "Adds gaming, cooking, science and fitness to Find Videos.",
+      "author": "Clippy",
+      "version": "1.0.0",
+      "adds": [
+        "4 Find Videos topics"
+      ],
+      "code": false,
+      "files": [
+        "extension.json"
+      ]
+    },
+    {
+      "id": "save-copies",
+      "name": "Save copies to Videos",
+      "description": "Puts a copy of every finished short in your Videos folder (Videos/Clippy Shorts), named after its title. An example of an extension with code.",
+      "author": "Clippy",
+      "version": "1.0.0",
+      "adds": [],
+      "code": true,
+      "files": [
+        "extension.json",
+        "main.py"
+      ]
+    }
+  ]
+}

@@ -111,7 +111,8 @@ def _worker():
 
 ALLOWED = {"clips", "min_seconds", "max_seconds", "highlight_color", "title_seconds", "remove_silences",
            "split_screen", "punch_in", "reuse_picks", "words_per_caption", "caption_y", "caption_style",
-           "caption_scale", "sfx", "sfx_volume", "motion", "teaser", "emojis", "progress_bar", "speech"}
+           "caption_scale", "sfx", "sfx_volume", "motion", "teaser", "emojis", "progress_bar", "speech",
+           "format", "top_theme", "top_count", "top_min", "top_max"}
 
 
 @app.post("/api/jobs")
@@ -121,6 +122,16 @@ def create_job(body: JobIn):
         raise HTTPException(400, "Paste a YouTube link first")
     job = _new_job(url=url, options={k: v for k, v in body.options.items() if k in ALLOWED})
     return {"id": job["id"]}
+
+
+@app.post("/api/upload")
+async def upload_video(request: Request, name: str = ""):
+    """A video from this computer: the browser sends the file itself as the request body (?name=its file name)."""
+    from . import uploads
+    try:
+        return await uploads.receive(request, name, OUT)
+    except uploads.UploadError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/jobs/{jid}")
@@ -441,6 +452,90 @@ def overview():
     }
 
 
+# ───────────────────────── looks, countdown themes, extensions ─────────────────────────
+
+BUILTIN_STYLES = [("beast", "Beast", "Comic, bouncy, tilted"), ("hormozi", "Hormozi", "Bold, colored keywords"),
+                  ("box", "Box", "Highlight box"), ("clean", "Clean", "Calm and minimal")]
+
+
+@app.get("/api/styles")
+def caption_styles():
+    """Every caption style: the built-in ones, then those extensions add."""
+    from . import extensions
+    out = [{"id": k, "name": n, "about": a, "preview": f"/static/styles/{k}.jpg", "extension": ""}
+           for k, n, a in BUILTIN_STYLES]
+    out += [{"id": k, "name": v["name"], "about": v["about"], "preview": v["preview"], "extension": v["extension"]}
+            for k, v in extensions.caption_styles().items()]
+    return out
+
+
+@app.get("/api/top-themes")
+def top_themes():
+    from . import top
+    return [{"id": k, "name": v["name"], "emoji": v.get("emoji", ""), "title": v.get("title", ""),
+             "extension": v.get("extension", "")} for k, v in top.themes().items()]
+
+
+class ExtensionIn(BaseModel):
+    id: str = ""
+    url: str = ""
+    on: bool = True
+    trust: bool = False
+
+
+def _ext_call(fn, *args, **kwargs):
+    from . import extensions
+    try:
+        return fn(*args, **kwargs)
+    except extensions.ExtensionError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:                     # e.g. Windows: a file of it is open somewhere
+        raise HTTPException(409, f"Couldn't change the extension's files: {e}")
+
+
+@app.get("/api/extensions")
+def extensions_list():
+    from . import extensions
+    extensions.changed()                     # an extension dropped into the folder by hand shows up
+    return {"installed": extensions.installed(), "folder": str(extensions.EXT_DIR)}
+
+
+@app.get("/api/extensions/catalog")
+def extensions_catalog():
+    from . import extensions
+    return extensions.catalog()
+
+
+@app.post("/api/extensions/install")
+def extensions_install(body: ExtensionIn):
+    from . import extensions
+    if body.url:
+        return _ext_call(extensions.install_from_url, body.url)
+    return _ext_call(extensions.install_from_catalog, body.id)
+
+
+@app.post("/api/extensions/{ext_id}/enable")
+def extensions_enable(ext_id: str, body: ExtensionIn):
+    from . import extensions
+    return _ext_call(extensions.set_enabled, ext_id, body.on, body.trust)
+
+
+@app.delete("/api/extensions/{ext_id}")
+def extensions_remove(ext_id: str):
+    from . import extensions
+    _ext_call(extensions.remove, ext_id)
+    return {"ok": True}
+
+
+@app.get("/ext/{ext_id}/{rel:path}")
+def extension_picture(ext_id: str, rel: str):
+    from . import extensions
+    f = extensions.file_for_page(ext_id, rel)
+    if f is None:
+        raise HTTPException(404, "Not found")
+    return FileResponse(f)
+
+
 # ───────────────────────── Video Finder (leaderboard) ─────────────────────────
 
 SCANS: dict[str, dict] = {}
@@ -458,8 +553,8 @@ class ScanIn(BaseModel):
 
 @app.get("/api/finder/niches")
 def finder_niches():
-    from .finder import NICHES
-    return list(NICHES)
+    from .finder import all_niches
+    return list(all_niches())
 
 
 @app.get("/api/finder/latest")
