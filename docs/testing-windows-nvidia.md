@@ -72,6 +72,21 @@ sometimes limits a home connection for a while. Any other error: take a screensh
 **Note:** how long did the whole video take? Did it say CUDA or CPU while transcribing? Did Video Encode show
 activity while rendering? Do the finished shorts play properly, with captions and emojis?
 
+## 3b. Upload a video, a Top countdown, and extensions
+
+1. **Upload:** drag a video file from your PC (a phone video works) onto the Make Clips box, or press
+   **Upload Video**. A progress bar shows the upload, then Clippy makes clips from it like from a link.
+2. **Top countdown:** under **What to make**, choose **Top countdown**, then **Funniest**, and make clips from a funny
+   video (a comedy podcast or a funny interview). You get one short: a "Top 3 Funniest Moments" title, then #3, #2
+   and #1, each with a big rank card.
+3. **Extensions:** open **Extensions**. Install **Extra caption styles** and **More countdowns**. Back on Make
+   Clips, the caption styles now include **Pop** and **Subtitle**, and the countdown has **Most awkward**, **Best
+   comebacks** and more. Install **Save copies to Videos** too: it says it runs code, and asks before it switches on.
+   Switch it on, make a short, and check your **Videos\Clippy Shorts** folder.
+
+**Note:** did the upload work, and how long did a big file take? Does the countdown look right (the order, the rank
+cards, the labels)? Did the extensions show up where they should?
+
 ## 4. Ending Clippy ends the AI as well
 
 1. Start making clips again (a different video, or the same one with other settings).
