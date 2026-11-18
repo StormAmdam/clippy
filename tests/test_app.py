@@ -142,5 +142,5 @@ def test_external_mode_skips_the_built_in_ai(app_dirs, monkeypatch):
     monkeypatch.setattr(llm, "detect", lambda **k: [])
     assert llm.resolve(Settings()).kind == "Built-in AI"
     llm._cache.clear()
-    with pytest.raises(RuntimeError, match="No local AI server found"):
+    with pytest.raises(RuntimeError, match="No local AI server found|Clippy has no AI to pick clips with yet"):
         llm.resolve(Settings(ai_mode="external"))

@@ -65,24 +65,23 @@ def _message(text: str) -> None:
 
 
 def probe(port: int) -> str:
-    """What's on this port: "ours" (this Clippy), "other" (another program, or a Clippy in another folder) or "free"."""
-    import httpx
-    try:
-        r = httpx.get(f"http://127.0.0.1:{port}/api/status", timeout=1.5)
-        j = r.json()
-        if r.status_code == 200 and isinstance(j, dict) and "llm" in j:
-            return "ours" if j.get("folder", str(config.ROOT)) == str(config.ROOT) else "other"
-        return "other"
-    except httpx.ConnectError:
-        pass
-    except (httpx.HTTPError, ValueError):
-        return "other"
+    """What's on this port: "ours" (this Clippy), "other" (another program, or a Clippy in another folder) or "free".
+    Binding first: on Windows, knocking on a port nobody listens on takes about two seconds to fail."""
     with socket.socket() as s:
         try:
             s.bind(("127.0.0.1", port))
             return "free"
         except OSError:
-            return "other"
+            pass
+    import httpx
+    try:
+        r = httpx.get(f"http://127.0.0.1:{port}/api/status", timeout=3)
+        j = r.json()
+    except (httpx.HTTPError, ValueError):
+        return "other"
+    if r.status_code == 200 and isinstance(j, dict) and "llm" in j:
+        return "ours" if j.get("folder", str(config.ROOT)) == str(config.ROOT) else "other"
+    return "other"
 
 
 def _saved_port() -> int | None:

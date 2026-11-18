@@ -1,5 +1,6 @@
 """Finding and talking to local AI servers (llama.cpp, Ollama, LM Studio, anything OpenAI-compatible)."""
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -145,7 +146,10 @@ def test_resolve_explains_what_to_do_when_no_ai_is_running(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         llm.resolve(Settings(llm_url="auto"))
     msg = str(e.value)
-    assert "No local AI server found" in msg and "ollama" in msg.lower() and "Settings" in msg
+    if sys.platform == "win32":                   # the Windows app downloads its own AI: say where
+        assert "AI & Tools" in msg and "Set Up Everything" in msg and "Ollama" in msg and "Settings" in msg
+    else:
+        assert "No local AI server found" in msg and "ollama" in msg.lower() and "Settings" in msg
 
 
 def test_resolve_uses_an_explicit_url_and_suggests_others_when_it_is_down(monkeypatch, serve):
