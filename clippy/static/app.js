@@ -187,6 +187,8 @@ async function route() {
   $$("#nav a").forEach((a) => { const on = a.dataset.page === page; a.classList.toggle("on", on); if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
   const el = $("#page");
   el.innerHTML = "";
+  el.classList.remove("enter"); void el.offsetWidth; el.classList.add("enter");   // the page settles in once
+  clearTimeout(route.enterT); route.enterT = setTimeout(() => el.classList.remove("enter"), 900);
   document.title = `${TITLES[page]} · Clippy`;
   try { await pages[page](el); }
   catch (e) { el.innerHTML = `<div class="panel empty"><div class="ic">${icon("alert")}</div><h3>This page couldn't load</h3><p>${esc(e.message)}. Reload the page; if it keeps happening, ${state.status?.os === "windows" ? "close Clippy and open it again" : "check the terminal running Clippy"}.</p></div>`; }
@@ -281,7 +283,7 @@ pages.home = async (el) => {
       <input class="input big" id="hUrl" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="YouTube link or video file" placeholder="https://www.youtube.com/watch?v=…">
       <button class="btn primary lg">${icon("scissors")} Make Clips</button></form>
     <div class="monitor">
-      <section class="panel" aria-labelledby="upT"><div class="row between" style="margin-bottom:14px"><h2 id="upT" style="margin:0;font-size:18px">Up next</h2><span id="upCount"></span></div><div id="upBody"></div></section>
+      <section class="panel" aria-labelledby="upT"><div class="row between" style="margin-bottom:14px"><h2 id="upT" style="margin:0">Up next</h2><span id="upCount"></span></div><div id="upBody"></div></section>
       <div class="side-col"><section class="panel onair-panel" id="hAir" aria-live="polite"></section><div class="facts" id="hFacts" style="grid-template-columns:1fr"></div></div>
     </div>
     <div class="sec" id="hChannels"></div>
@@ -769,7 +771,7 @@ function renderSetup(ps, client) {
   if (box.dataset.sig === s) return;
   box.dataset.sig = s;
   box.innerHTML = `<section class="panel">
-    <div class="row between"><div><h2 style="margin:0;font-size:18px">Connect YouTube</h2><p class="sub" style="margin:2px 0 0">One-time setup so Clippy can upload for you. Free, about 10 minutes.</p></div>
+    <div class="row between"><div><h2 style="margin:0">Connect YouTube</h2><p class="sub" style="margin:2px 0 0">One-time setup so Clippy can upload for you. Free, about 10 minutes.</p></div>
       <span class="tag ${doneCount === 3 ? "ok" : "you"}">${doneCount} of 3 done</span></div>
     <div style="margin-top:8px">
       <div class="check ${client.has_client ? "done" : ""}"><span class="n">${client.has_client ? icon("check") : 1}</span><div class="t"><b>Create a free Google Cloud project</b>
@@ -1035,7 +1037,7 @@ pages.library = async (el) => {
     const byId = Object.fromEntries(st.projects.map((p) => [p.id, p]));
     const pct = (b) => st.total ? Math.max(b ? 0.5 : 0, (b / st.total) * 100) : 0;
     $("#libStore").innerHTML = `<section class="panel"><div class="store"><div>
-        <div class="row between" style="margin-bottom:10px"><b>Storage</b><span class="num">${fmtBytes(st.total)} used</span></div>
+        <div class="row between" style="margin-bottom:12px"><h2 style="margin:0">Storage</h2><span class="num">${fmtBytes(st.total)} used</span></div>
         <div class="stbar" role="img" aria-label="${fmtBytes(st.sources)} of downloads and ${fmtBytes(st.clips)} of shorts"><i class="src" style="width:${pct(st.sources)}%"></i><i class="clp" style="width:${pct(st.clips)}%"></i></div>
         <div class="legend"><span><i style="background:#9ea2ad"></i>Downloaded videos: ${fmtBytes(st.sources)}</span><span><i style="background:var(--yellow)"></i>Your shorts: ${fmtBytes(st.clips)}</span></div></div>
       <button type="button" class="btn" id="libClean" ${st.sources ? "" : "disabled"}>${icon("trash")} Delete All Downloads</button></div>
