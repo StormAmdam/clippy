@@ -6,43 +6,50 @@ encoding on the graphics card (NVENC). Everything else (the installer, updating,
 start at login, notifications, folders with letters like ö) is already tested automatically on every change.
 
 It takes about an hour, most of it waiting for downloads. Write down what you see at each step, especially anything
-marked **Note:**. If something goes wrong, the error text and the two log files listed at the end are the most
-useful things to send.
+marked **Note:**. If something goes wrong, take a screenshot (Windows key + Shift + S) and keep the two log files
+listed at the end.
+
+## Get the test version
+
+1. On Windows, open the latest test build:
+   [github.com/StormAmdam/clippy/actions/workflows/windows-app.yml](https://github.com/StormAmdam/clippy/actions/workflows/windows-app.yml?query=branch%3Awindows-app).
+   Click the top run with a green tick.
+2. Sign in to GitHub if it asks (downloads there need an account).
+3. Scroll down to **Artifacts** and click **Clippy-windows-0.1.0-dev.…** (about 360 MB). It downloads as a zip.
+4. Open the zip and drag **Clippy-Setup-0.1.0-dev.…-win64.exe** out to your Desktop.
 
 ## Before you start
 
 - **Graphics driver.** Open Task Manager (Ctrl+Shift+Esc) → Performance → GPU. Under the graph it shows the card's
   name and its driver version. **Note:** the card name and driver version. A driver from 2023 or newer is needed
   (version 527 or higher).
-- **Free space.** About 15 GB.
+- **Free space.** About 25 GB on the C: drive. Clippy picks an AI model that fits your PC; the biggest is 17.7 GB.
 - **A test video.** A 5–10 minute YouTube video where someone talks, for example an interview or a podcast clip.
 
-## 1. Update over the Clippy you already have
+## 1. Install (or update over the Clippy you have)
 
-1. Leave your current Clippy installed, with its downloaded models and shorts. Close its window.
-2. Run the new **Clippy-Setup-…-win64.exe**.
-3. Clippy opens. Go to **Library** and **AI & Tools**.
+1. If Clippy is already installed on this Windows, keep it, with its models and shorts: the new installer updates it,
+   and that's part of the test. Close its window first.
+2. Run **Clippy-Setup-…-win64.exe**. If Windows says **"Windows protected your PC"**, click **More info**, then
+   **Run anyway**.
+3. Clippy opens in its own window.
 
-**Note:** are your earlier shorts and downloaded AI models still there? Did the installer say anything unusual?
+**Note:** if you updated: are your earlier shorts (**Library**) and AI models (**AI & Tools**) still there? Did the
+installer say anything unusual?
 
-## 2. NVIDIA acceleration (Whisper on the graphics card)
+## 2. Set up everything
 
-1. Go to **AI & Tools**. There should be a part called **NVIDIA acceleration**. It only appears when Clippy sees an
-   NVIDIA card.
-2. If it isn't installed yet, press its download button (about 1.5 GB). Wait until it says
-   **"Whisper runs on your NVIDIA card"**.
+1. Go to **AI & Tools** and press **Set Up Everything**. It downloads the video tools, the speech model, the NVIDIA
+   part and an AI model. This is the long wait.
+2. When it's done, look at the parts:
+   - **NVIDIA acceleration** should say **"Whisper runs on your NVIDIA card"**. This part only appears when Clippy
+     sees an NVIDIA card.
+   - **AI engine** should say **"llama.cpp b…, runs on your NVIDIA graphics card"**.
 
-**Note:** did the NVIDIA acceleration part appear? Did it install? If it failed, copy the error text.
+**Note:** what do those two lines say? If anything failed, copy the error text. If the AI engine says "runs on your
+processor", press its remove button, download it again, and note what it says then.
 
-## 3. The AI engine on the graphics card
-
-1. On **AI & Tools**, look at the **AI engine** part. It should say
-   **"llama.cpp b…, runs on your NVIDIA graphics card"**.
-2. If it says "runs on your processor", press its remove button and download it again.
-
-**Note:** what does the AI engine line say?
-
-## 4. Make clips
+## 3. Make clips
 
 1. Go to **Make Clips**, paste the YouTube link, and press **Make Clips**.
 2. Keep Task Manager open on Performance → GPU while it works.
@@ -56,7 +63,7 @@ useful things to send.
 **Note:** how long did the whole video take? Did it say CUDA or CPU while transcribing? Did Video Encode show
 activity while rendering? Do the finished shorts play properly, with captions and emojis?
 
-## 5. Ending Clippy ends the AI as well
+## 4. Ending Clippy ends the AI as well
 
 1. Start making clips again (a different video, or the same one with other settings).
 2. While it says **"AI is watching the video…"**, open Task Manager → **Details**. You'll see **llama-server.exe**
@@ -67,18 +74,23 @@ activity while rendering? Do the finished shorts play properly, with captions an
 
 **Note:** did llama-server.exe disappear by itself?
 
-## 6. Start at login and notifications
+## 5. Start at login, notifications and Quit
 
-1. Go to **Settings** and turn on **Start Clippy when you log in**.
+1. Open Clippy again from the Start menu. Go to **Settings** and turn on **Start Clippy when you log in**.
 2. Restart the PC and log in. Don't open anything. Open Task Manager → Details: **pythonw.exe** should be running.
 3. Open Clippy from the Start menu. The window should open quickly.
 4. Go to **Autopilot**, create a channel (any topic), and press **Run**. When it finishes, a Windows notification
    should pop up: **"N new shorts for … are waiting for your review"**, from **Clippy**. Click it.
+5. Close Clippy's window. Wait a minute: **pythonw.exe** should still be running (Start at login keeps it going).
+6. Open Clippy again → **Settings** → **Quit Clippy** → **Quit**. Within a few seconds pythonw.exe and
+   llama-server.exe should be gone from Task Manager.
 
 **Note:** did Clippy start by itself after the restart? Did the notification appear, and did it say "Clippy"? What
-happened when you clicked it?
+happened when you clicked it? Did Quit Clippy stop it?
 
-## 7. Uninstall
+## 6. Uninstall
+
+Copy the two log files (see below) somewhere safe first, for example a USB stick.
 
 1. Open Windows Settings → Apps → Installed apps → **Clippy** → Uninstall. Answer **Yes** when it asks to keep your
    shorts.
@@ -92,6 +104,7 @@ happened when you clicked it?
 
 - your notes from each step
 - screenshots of **AI & Tools**, and of any error
-- these two files, from the Clippy folder (`%LOCALAPPDATA%\Programs\Clippy`), copied **before** uninstalling:
-  - `data\clippy.log`: what Clippy itself did
-  - `data\engine.log`: what the AI engine did (whether it found the graphics card: look for "CUDA0")
+- these two files, from the Clippy folder (paste `%LOCALAPPDATA%\Programs\Clippy\data` into File Explorer's
+  address bar), copied **before** uninstalling:
+  - `clippy.log`: what Clippy itself did
+  - `engine.log`: what the AI engine did (whether it found the graphics card: look for "CUDA0")
