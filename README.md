@@ -48,7 +48,9 @@ and the picture instead.
 3. Paste a YouTube link and press **Make Clips**.
 
 Everything Clippy downloads stays inside its own folder, so uninstalling removes all of it. The uninstaller
-offers to move your finished shorts to `Videos\Clippy` first.
+offers to move your finished shorts to `Videos\Clippy` first. To update, run a newer installer over it: downloaded
+models, settings and shorts stay. Turn on **Start at login** in Settings to keep Clippy running in the background for
+scheduled Autopilot runs; it tells you with a Windows notification when new shorts are waiting.
 
 ### Linux
 
@@ -120,8 +122,9 @@ file for posting to TikTok from your phone.
 
 ## Requirements
 
-- **Linux** (Ubuntu, Debian, Arch, Fedora…) or **Windows 10/11 with WSL**. Python 3.11+ is all you need beforehand;
-  setup installs the rest.
+- **Windows 10/11**: the app above brings everything it needs.
+- **Linux** (Ubuntu, Debian, Arch, Fedora…), also inside WSL. Python 3.11+ is all you need beforehand; setup installs
+  the rest.
 - **An NVIDIA graphics card** is recommended, for fast transcribing and encoding. Everything also runs on the
   CPU, just slower.
 - **Disk space:** about 3 GB for Clippy, plus 3–23 GB for a local AI model, plus your videos.
