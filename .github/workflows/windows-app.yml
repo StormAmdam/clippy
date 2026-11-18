@@ -24,13 +24,17 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
-      - name: The tag matches clippy/version.py (version tags only)
-        if: github.ref_type == 'tag'
+      - name: The version is the same everywhere (and on version tags, the tag's)
         shell: pwsh
         run: |
           $v = (Select-String -Path clippy/version.py -Pattern 'VERSION = "(.+)"').Matches[0].Groups[1].Value
-          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "clippy/version.py says $v but the tag is $env:GITHUB_REF_NAME: the app would tell people the wrong version" }
-          if (-not (Select-String -Path packaging/windows/launcher.rc -SimpleMatch "`"ProductVersion`", `"$v`"")) { throw "packaging/windows/launcher.rc doesn't say $v: Clippy.exe would show the wrong version" }
+          if (-not (Select-String -Path packaging/windows/launcher.rc -SimpleMatch ('"ProductVersion", "' + $v + '"'))) {
+            throw "packaging/windows/launcher.rc doesn't say ${v}, so Clippy.exe would show the wrong version"
+          }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and "v$v" -ne $env:GITHUB_REF_NAME) {
+            throw "clippy/version.py says $v but the tag is ${env:GITHUB_REF_NAME}, so the app would tell people the wrong version"
+          }
+          "Version $v everywhere"
       - name: Build, smoke-test and package
         shell: pwsh
         run: ./packaging/windows/build.ps1 -SmokeTest
