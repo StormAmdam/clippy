@@ -29,12 +29,27 @@ ask()  {  # yes → 0
   [ -t 0 ] || return 1
   local r; read -r -p "  $1 [Y/n] " r; [[ -z "$r" || "$r" =~ ^[YyJj] ]]
 }
-pm_install() {
+pm_run() {
   if   command -v apt-get >/dev/null; then sudo apt-get update -q && sudo apt-get install -y "$@"
   elif command -v pacman  >/dev/null; then sudo pacman -S --needed --noconfirm "$@"
   elif command -v dnf     >/dev/null; then sudo dnf install -y "$@"
   elif command -v zypper  >/dev/null; then sudo zypper install -y "$@"
   else return 1; fi
+}
+pkg_present() {  # is this package installed?
+  if   command -v apt-get >/dev/null; then dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "ok installed"
+  elif command -v pacman  >/dev/null; then pacman -Q "$1" >/dev/null 2>&1
+  elif command -v rpm     >/dev/null; then rpm -q "$1" >/dev/null 2>&1
+  else return 1; fi
+}
+RECORD="$DIR/data/setup-installed.txt"   # what setup installed that wasn't here before: clippy uninstall offers to remove it
+record() { mkdir -p "$DIR/data" && { grep -qxF "$*" "$RECORD" 2>/dev/null || echo "$*" >> "$RECORD"; }; }
+pm_install() {
+  local new=() p
+  for p in "$@"; do pkg_present "$p" || new+=("$p"); done
+  pm_run "$@" || return 1
+  for p in ${new[@]+"${new[@]}"}; do pkg_present "$p" && record package "$p"; done
+  return 0
 }
 pkg_name() {  # generic name → this distro's package
   case "$1" in
@@ -198,6 +213,7 @@ setup_ollama() {
     if ask "Install Ollama with its official installer from ollama.com? (It asks for your password.)"; then
       command -v zstd >/dev/null || pm_install zstd || true   # the installer needs it to unpack
       curl -fsSL https://ollama.com/install.sh | sh || { warn "The Ollama installer failed (see above)."; return 1; }
+      record ollama
     else
       warn "Skipped installing Ollama."; return 1
     fi
@@ -208,7 +224,10 @@ setup_ollama() {
   fi
   ollama list >/dev/null 2>&1 || { warn "Ollama isn't answering. Start it with:  ollama serve"; return 1; }
   printf '  Downloading %s, sized for this PC (the big download)…\n' "$model"
+  local had=0
+  ollama list 2>/dev/null | awk 'NR > 1 {print $1}' | grep -qxF -e "$model" -e "$model:latest" && had=1
   ollama pull "$model" || { warn "Couldn't download $model."; return 1; }
+  [ "$had" = 1 ] || record ollama-model "$model"
   ok "Ollama is ready with $model"
 }
 setup_llamacpp() {
@@ -282,7 +301,7 @@ if [ "$TESTS" = 1 ]; then
   else warn "Some self-tests failed (output above). Clippy may still run; mention it if something breaks."; fi
 fi
 
-printf '\n\033[1mDone%s.\033[0m Start Clippy with:  clippy web   (or ./clippy.sh web)\n' \
+printf '\n\033[1mDone%s.\033[0m Start Clippy with:  clippy web   (or ./clippy.sh web).  To remove it again:  clippy uninstall\n' \
   "$([ "$WARN" -gt 0 ] && echo " with $WARN note(s) above")"
 if [ "$IS_WSL" = 1 ]; then
   echo "It opens in your Windows browser at http://localhost:7860 (or open that address yourself)."

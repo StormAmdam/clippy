@@ -74,6 +74,11 @@ Setup puts Clippy in `~/clippy` and walks you through the rest (Python packages,
 local AI that fits your PC). Then start it with `clippy app` for its own window, or `clippy web` for a browser tab.
 Run the install line again any time to update.
 
+To remove it, run `clippy uninstall`. It removes the Clippy folder, the `clippy` command and Start at login, and moves
+your finished shorts to `~/Videos/Clippy shorts` unless you say otherwise. It also offers to remove the AI and the
+system packages setup installed for Clippy (never ones that were on your PC before). `clippy uninstall --help` lists
+the options.
+
 <details>
 <summary><b>Windows with WSL instead</b></summary>
 

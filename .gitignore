@@ -6,6 +6,8 @@ __pycache__/
 
 # Your data: downloads, transcripts, finished clips, Autopilot/Review state, YouTube login, scans
 output/
+# Extensions you installed (Extensions page)
+extensions/
 # Everything Clippy downloads for itself (AI & Tools): models, AI engine, tools, partial downloads
 models/whisper/
 models/llm/

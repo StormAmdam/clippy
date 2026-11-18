@@ -1,4 +1,5 @@
-"""Command line: ./clippy <youtube-url> [options]   |   ./clippy web   |   ./clippy auto   |   ./clippy ai [test]"""
+"""Command line: clippy <youtube-url> [options]  |  clippy web  |  clippy app  |  clippy auto  |  clippy ai [test]
+|  clippy uninstall (removes Clippy and what its setup installed; see clippy/uninstall.py)"""
 from __future__ import annotations
 
 import argparse
@@ -22,8 +23,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "app":
         from .desktop import main as app
         return app(argv[1:])
+    if argv and argv[0] == "uninstall":
+        from .uninstall import main as uninstall
+        return uninstall(argv[1:])
 
-    ap = argparse.ArgumentParser(prog="clippy", description="Turn a YouTube video into ready-to-post vertical clips.")
+    ap = argparse.ArgumentParser(prog="clippy", description="Turn a YouTube video into ready-to-post vertical clips.",
+                                 epilog="Other commands: clippy web | clippy app | clippy auto | clippy ai [test] | "
+                                        "clippy uninstall [--help]")
     ap.add_argument("url", help="YouTube link (or a local video file)")
     ap.add_argument("-n", "--clips", type=int, help="number of clips (default 5)")
     ap.add_argument("--min", dest="min_seconds", type=int, help="min clip length in seconds (default 20)")
