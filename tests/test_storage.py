@@ -163,6 +163,7 @@ def test_yt_dlp_runs_as_a_module_of_clippys_own_python(monkeypatch, tmp_path):
     pyw.write_bytes(b"")
     (tmp_path / "python" / "python.exe").write_bytes(b"")
     monkeypatch.setattr(download.sys, "executable", str(pyw))
+    monkeypatch.setattr(download.importlib.util, "find_spec", lambda name: object())   # yt-dlp in Clippy's Python
     assert download.ytdlp() == [str(tmp_path / "python" / "python.exe"), "-m", "yt_dlp"]   # console: no windows
     monkeypatch.setattr(download.importlib.util, "find_spec", lambda name: None)
     assert download.ytdlp() == ["yt-dlp"]                          # not in Clippy's Python: the one on the PC
