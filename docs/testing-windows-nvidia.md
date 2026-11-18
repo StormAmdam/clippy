@@ -9,14 +9,15 @@ It takes about an hour, most of it waiting for downloads. Write down what you se
 marked **Note:**. If something goes wrong, take a screenshot (Windows key + Shift + S) and keep the two log files
 listed at the end.
 
-## Get the test version
+## Get Clippy
 
-1. On Windows, open the latest test build:
-   [github.com/StormAmdam/clippy/actions/workflows/windows-app.yml](https://github.com/StormAmdam/clippy/actions/workflows/windows-app.yml?query=branch%3Awindows-app).
-   Click the top run with a green tick.
-2. Sign in to GitHub if it asks (downloads there need an account).
-3. Scroll down to **Artifacts** and click **Clippy-windows-0.1.0-dev.…** (about 360 MB). It downloads as a zip.
-4. Open the zip and drag **Clippy-Setup-0.1.0-dev.…-win64.exe** out to your Desktop.
+Download **Clippy-Setup-…-win64.exe** from the
+[latest release](https://github.com/StormAmdam/clippy/releases/latest).
+
+To test a change before it's released: open
+[the Windows builds](https://github.com/StormAmdam/clippy/actions/workflows/windows-app.yml), click the newest run
+with a green tick (sign in to GitHub if it asks), scroll to **Artifacts**, download **Clippy-windows-…**, and take
+the setup file out of the zip.
 
 ## Before you start
 

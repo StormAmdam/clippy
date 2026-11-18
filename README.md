@@ -39,6 +39,10 @@ and the picture instead.
 kind, #3, #2 and then #1, each with a big rank card: the funniest, craziest, most shocking or most wholesome moments.
 For the funniest, laughter and loud reactions count too. Extensions add more kinds.
 
+<img src="docs/media/countdown.jpg" width="100%" alt="Four frames of one countdown short made from a NASA video: the title Top 3 Craziest Moments, then rank cards #3 Billion Galaxies Survey, #2 Rogue Planets Drifting and #1 Universe Speeding Up, each above word-by-word captions">
+
+<sub>A real countdown, made by Clippy from a public-domain NASA Goddard video.</sub>
+
 **Extensions.** The Extensions page installs caption styles, countdown themes, sound effects and Find Videos topics
 that other people made, from the community list or a link. Extensions with code stay off until you say you trust
 them. [Make your own](docs/extensions.md).
@@ -128,6 +132,9 @@ Colours, size, position and words per line are all adjustable.
 Approved shorts upload to YouTube (optionally spaced out, e.g. one every 4 hours) or are exported with a caption
 file for posting to TikTok from your phone.
 
+**Two looks.** Caption print (above) sets titles like the captions in your shorts; Classic is calmer. Switch under
+Settings → Theme.
+
 ## Requirements
 
 - **Windows 10/11**: the app above brings everything it needs.
@@ -153,7 +160,9 @@ is running on this PC (or, from WSL, on the Windows side) on these apps' usual p
 | [Jan](https://jan.ai), [KoboldCpp](https://github.com/LostRuins/koboldcpp), [vLLM](https://github.com/vllm-project/vllm) | `:1337`, `:5001`, `:8000` | Turn on the app's local API server |
 | Anything else OpenAI-compatible | your address | Enter it under **Settings → AI**, with an API key for cloud services |
 
-**Which model:** Clippy uses the model already loaded, otherwise your newest download, and skips embedding models.
+**Which model:** Clippy prefers a Qwen 3 model (its instructions are written for it). On Ollama that's any Qwen 3 you
+downloaded; on apps that only serve what's loaded, the loaded model comes first. Models made for one job (embeddings,
+translation, code) are only used when nothing else is there.
 Pick another one under **Settings → AI**, which lists every server and model it found. In the terminal,
 `clippy ai` shows the same, and `clippy ai test` sends a real request and times it.
 
