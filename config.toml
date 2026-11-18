@@ -3,7 +3,7 @@
 
 # ── The AI that picks the clips ─────────────────────────────────────────────
 # "auto" finds a running llama.cpp, Ollama, LM Studio, Jan, KoboldCpp or vLLM by itself (also on the Windows
-# side when Clippy runs in WSL). Check what it finds with:  ./clippy.sh ai
+# side when Clippy runs in WSL). Check what it finds under Settings → AI in the app, or with:  clippy ai
 # llm_url = "auto"               # or a fixed address, e.g. "http://127.0.0.1:11434" (Ollama), "http://127.0.0.1:1234" (LM Studio)
 # llm_model = ""                 # empty = the loaded model, else your newest download (embedding models are skipped)
 # llm_context = 0                # tokens per request; 0 = ask the server (Ollama: 16384)
@@ -16,7 +16,8 @@
 
 # ── GPU ─────────────────────────────────────────────────────────────────────
 # Whisper needs ~2.6 GB of free VRAM. If a local LLM leaves less than that (typical on 6–8 GB cards),
-# Clippy pauses this systemd user service while transcribing, then starts it again right after.
+# Clippy pauses its built-in AI, or this systemd user service (Linux), while transcribing, then starts it again
+# right after.
 # llama_service = "llama-coder"
 # free_gpu_for_whisper = true     # false = never touch the service (Whisper falls back to CPU, ~10x slower)
 # whisper_model = "large-v3-turbo"
