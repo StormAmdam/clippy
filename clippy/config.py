@@ -38,6 +38,7 @@ class Settings:
 
     # ── The app
     ui_theme: str = "caption"            # caption = caption print (bold, comic titles) | classic = the original look
+    check_updates: bool = True           # ask GitHub for a newer Clippy when it opens (it never updates by itself)
 
     # ── Clips
     clips: int = 5

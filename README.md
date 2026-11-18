@@ -54,14 +54,14 @@ them. [Make your own](docs/extensions.md).
 1. Download **Clippy-Setup-win64.exe** from the [latest release](https://github.com/StormAmdam/clippy/releases/latest)
    and run it. No admin rights needed. (Prefer no installer? The portable zip works from any folder.)
    Windows may say **"Windows protected your PC"** because the installer isn't code-signed yet: click
-   **More info**, then **Run anyway**.
+   **More info**, then **Run anyway**. ([Why, and what's being done about it](docs/code-signing.md).)
 2. Clippy opens in its own window. On **AI & Tools**, press **Set Up Everything**: it downloads the video tools,
    the speech model and an AI model that fits your PC, or uses Ollama or LM Studio if you already run one.
 3. Paste a YouTube link and press **Make Clips**.
 
 Everything Clippy downloads stays inside its own folder, so uninstalling removes all of it. The uninstaller
-offers to move your finished shorts to `Videos\Clippy` first. To update, run a newer installer over it: downloaded
-models, settings and shorts stay. Turn on **Start at login** in Settings to keep Clippy running in the background for
+offers to move your finished shorts to `Videos\Clippy` first. When a new version is out, Clippy tells you and updates
+itself if you say so (or run a newer installer over it): downloaded models, settings and shorts stay. Turn on **Start at login** in Settings to keep Clippy running in the background for
 scheduled Autopilot runs; it tells you with a Windows notification when new shorts are waiting.
 
 ### Linux

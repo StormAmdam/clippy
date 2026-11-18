@@ -495,3 +495,7 @@ details.more > div { padding: 0 14px 14px; }
 /* ── what newer screens need in the classic look ── */
 @font-face { font-family: "Luckiest Guy"; src: url("/static/LuckiestGuy-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
 .panel h2 { margin: 0; font-size: 18px; font-weight: 600; }   /* headings set beside a count or a button */
+
+/* the dock's update button: on phones there's no dock, and updating is for the PC Clippy runs on */
+#updatePill { width: 100%; }
+@media (max-width: 820px) { #updatePill { display: none !important; } }

@@ -46,6 +46,8 @@ Name: "{autodesktop}\Clippy"; Filename: "{app}\Clippy.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Clippy.exe"; Description: "Start Clippy"; Flags: nowait postinstall skipifsilent
+; an update started from inside Clippy (clippy/updates.py) runs silently: open Clippy again afterwards
+Filename: "{app}\Clippy.exe"; Flags: nowait; Check: RestartClippy
 
 [UninstallDelete]
 ; everything Clippy downloaded or made lives in its folder: remove all of it
@@ -79,13 +81,19 @@ begin
   App := ExpandConstant('{app}');
   StringChangeEx(App, '''', '''''', True);       { a ' in the path, doubled for PowerShell }
   Script := '$d = (''' + App + ''').ToLower(); $w = ''--user-data-dir='' + $d + ''\data\window''; ' +
-    'Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.Name -notlike ''unins*'' -and ' +
+    'Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.Name -notlike ''unins*'' -and $_.Name -notlike ''Clippy-Setup*'' -and ' +
     '(($_.ExecutablePath -and $_.ExecutablePath.ToLower().StartsWith($d + ''\'')) -or ' +
     '($_.CommandLine -and $_.CommandLine.ToLower().Contains($w))) } | ' +
     'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }';
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
        '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+{ /CLIPPYRESTART=1: Clippy started this update itself, so open it again when done }
+function RestartClippy: Boolean;
+begin
+  Result := ExpandConstant('{param:CLIPPYRESTART|0}') = '1';
 end;
 
 { updating: close the running Clippy first, so every file can be replaced }

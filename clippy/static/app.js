@@ -1262,6 +1262,9 @@ pages.settings = async (el) => {
       <div class="set"><div><b>Theme</b><p>How Clippy looks. It changes straight away, here and in every window.</p></div>
         <div class="choices wide" id="sTheme" role="radiogroup" aria-label="Theme">${UI_THEMES.map(([v, n, d]) => `<button type="button" role="radio" aria-checked="${(s.ui_theme || "caption") === v}"
           class="choice ${(s.ui_theme || "caption") === v ? "on" : ""}" data-theme="${v}"><span class="tick" style="z-index:1">${icon("check")}</span>${themeSample(v)}<b>${n}</b><small>${d}</small></button>`).join("")}</div></div>
+      <div class="set"><div><b>Updates</b><p id="sVersion">You have Clippy ${esc(state.version || "")}.</p></div>
+        <div class="stack"><label class="switch"><span class="ic">${icon("refresh")}</span><span class="txt"><b>Check for updates when Clippy opens</b><small>It asks GitHub for a newer version and tells you. It never updates without you.</small></span><input type="checkbox" data-k="check_updates" ${s.check_updates ? "checked" : ""}></label>
+          <div class="row"><button type="button" class="btn sm" id="sCheck">${icon("refresh")} Check Now</button><span class="small muted" id="sCheckNote"></span></div></div></div>
       <div class="set"><div><b>Start at login</b><p>${win ? "Keeps Clippy running in the background, also after you close its window, so scheduled Autopilot runs happen. Open Clippy as usual to see it." : "Keeps Clippy running in the background so scheduled Autopilot runs happen even when no terminal is open."}</p></div>
         <div>${auto.supported ? `<label class="switch"><span class="ic">${icon("power")}</span><span class="txt"><b>Start Clippy when you log in</b><small id="autoNote">${auto.enabled ? "On: Clippy starts automatically at login." : autoOff}</small></span><input type="checkbox" id="autoSw" ${auto.enabled ? "checked" : ""}></label>`
           : `<p class="muted">${auto.how === "windows-source" ? "Available in the Clippy app for Windows." : win ? "Not available here." : "Not available on this system. It needs systemd."}</p>`}
@@ -1336,6 +1339,13 @@ pages.settings = async (el) => {
     $$("#sTheme .choice").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); });
     toast(`Theme: ${UI_THEMES.find((t) => t[0] === v)[1]}`);
   });
+  api.get("/api/update").then((u) => { state.version = u.current; $("#sVersion") && ($("#sVersion").textContent = `You have Clippy ${u.current}.`); }).catch(() => {});
+  $("#sCheck").onclick = async () => {
+    $("#sCheck").disabled = true; $("#sCheckNote").textContent = "Checking…";
+    const u = await checkForUpdate(true);
+    $("#sCheck").disabled = false;
+    $("#sCheckNote").textContent = !u ? "Couldn't check right now." : u.error ? `Couldn't reach GitHub: ${u.error}` : u.newer ? `Clippy ${u.latest} is out.` : `You have the latest version (${u.current}).`;
+  };
   $("#quitApp")?.addEventListener("click", async () => {
     const busy = state.status?.running || state.status?.queued;
     const yes = await confirmDialog({title: "Quit Clippy?", confirm: "Quit", danger: Boolean(busy),
@@ -1353,8 +1363,82 @@ pages.settings = async (el) => {
   });
 };
 
+// ───────────────────────── updates ─────────────────────────
+// a light take on the release notes: headings and bold become bold, "- " lines become a list
+function notesHtml(md) {
+  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  let out = "", list = false;
+  for (const line of String(md || "").split(/\r?\n/)) {
+    const li = line.match(/^\s*[-*] (.*)$/);
+    if (li) { if (!list) { out += "<ul>"; list = true; } out += `<li>${inline(li[1])}</li>`; continue; }
+    if (list) { out += "</ul>"; list = false; }
+    const h = line.match(/^#+ (.*)$/);
+    if (h) out += `<p style="margin:12px 0 4px"><b>${inline(h[1])}</b></p>`;
+    else if (line.trim()) out += `<p style="margin:6px 0">${inline(line)}</p>`;
+  }
+  return out + (list ? "</ul>" : "");
+}
+
+function showUpdate(u) {
+  if ($("#updModal")) return;
+  const bg = document.createElement("div");
+  bg.className = "modal-bg"; bg.id = "updModal";
+  const action = u.can_install ? `<button type="button" class="btn primary" id="updGo">${icon("download")} Update Now</button>`
+    : u.how === "portable" ? `<a class="btn primary" href="${esc(u.url || u.releases)}" target="_blank" rel="noopener">${icon("external")} Open the Download Page</a>`
+    : `<button type="button" class="btn primary" id="updCopy">${icon("copy")} Copy the Install Line</button>`;
+  bg.innerHTML = `<div class="modal small" role="dialog" aria-modal="true" aria-labelledby="updT">
+    <div class="mh"><h2 id="updT">Hey, there's a new update!</h2></div>
+    <div class="mb"><p>Clippy <b>${esc(u.latest)}</b> is out, and you have ${esc(u.current)}. You don't have to update, but it's recommended.</p>
+      ${u.how === "install-line" ? `<p class="small muted" style="margin:10px 0 6px">To update, run this in a terminal (it keeps your shorts and settings):</p><div class="aibox break" style="font:13px/1.5 ui-monospace,monospace">${esc(u.install_line)}</div>` : ""}
+      ${u.how === "installer" ? `<p class="small muted" style="margin:8px 0 0">It keeps your AI models, settings and shorts. Clippy closes while it updates and opens again by itself.</p>` : ""}
+      ${u.notes ? `<div class="aibox small" style="margin-top:14px;max-height:240px;overflow:auto">${notesHtml(u.notes)}</div>` : ""}
+      <div id="updProg" class="hidden" style="margin-top:14px"></div></div>
+    <div class="mf"><span class="grow"></span><button type="button" class="btn quiet" id="updLater">Not Now</button>${action}</div></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); document.removeEventListener("keydown", key, true); };
+  const key = (e) => { if (e.key === "Escape") { e.preventDefault(); later(); } };
+  const later = () => { try { sessionStorage.setItem("clippy-update-later", u.latest); } catch {} close(); };   // asked again next time Clippy opens
+  document.addEventListener("keydown", key, true);
+  $("#updLater", bg).onclick = later;
+  $("#updCopy", bg)?.addEventListener("click", async () => { try { await navigator.clipboard.writeText(u.install_line); toast("Install line copied"); } catch { toast("Select the line and copy it yourself", "bad"); } });
+  $("#updGo", bg)?.addEventListener("click", async () => {
+    $("#updGo", bg).disabled = $("#updLater", bg).disabled = true;
+    const prog = $("#updProg", bg); prog.classList.remove("hidden");
+    try { await api.post("/api/update/install"); } catch (e) { fail(e); $("#updGo", bg).disabled = $("#updLater", bg).disabled = false; return; }
+    let gone = false;
+    const t = setInterval(async () => {
+      let s = null; try { s = await api.get("/api/update"); } catch {}
+      if (!s) { gone = true; prog.innerHTML = `<p class="small">Installing the update. Clippy opens again by itself in a moment.</p>`; return; }
+      if (gone) { clearInterval(t); location.reload(); return; }                 // back after updating
+      const k = s.task || {};
+      if (k.state === "failed") { clearInterval(t); prog.innerHTML = `<span class="err-text">${esc(k.error)}</span>`; $("#updLater", bg).disabled = false; return; }
+      const pct = k.total ? Math.round(100 * k.done / k.total) : null;
+      prog.innerHTML = `<div class="bar ${pct == null ? "wait" : ""}"><i style="width:${pct ?? 0}%"></i></div>
+        <p class="small muted" style="margin:8px 0 0">${esc(k.step || (pct != null ? `Downloading ${fmtBytes(k.done)} of ${fmtBytes(k.total)}` : "Getting the update…"))}</p>`;
+    }, 1000);
+  });
+  $(u.can_install ? "#updGo" : "#updLater", bg)?.focus();
+}
+
+function updateNotice(u) {
+  const pill = $("#updatePill");
+  if (!pill) return;
+  const on = Boolean(u && u.newer && u.local);
+  pill.classList.toggle("hidden", !on);
+  if (on) { pill.innerHTML = `${icon("download")} Update to ${esc(u.latest)}`; pill.onclick = () => showUpdate(u); }
+}
+
+async function checkForUpdate(force = false) {
+  let u; try { u = await api.get("/api/update" + (force ? "?force=true" : "")); } catch { return null; }
+  updateNotice(u);
+  let later = null; try { later = sessionStorage.getItem("clippy-update-later"); } catch {}
+  if (u.newer && u.local && (force || later !== u.latest)) showUpdate(u);
+  return u;
+}
+
 // ───────────────────────── boot ─────────────────────────
 hydrateIcons();
 refreshGlobal();
 const globalTimer = setInterval(refreshGlobal, 5000);
 loadLooks().finally(route);
+setTimeout(() => checkForUpdate(), 2500);         // when Clippy opens: is there a newer version?

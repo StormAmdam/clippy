@@ -551,3 +551,7 @@ details.more > div { padding: 0 14px 14px; }
   .rowi.model { flex-wrap: wrap; } .rowi .acts { width: 100%; justify-content: flex-end; } }
 #aiAdd { flex-wrap: nowrap; } #aiAdd .input { flex: 1; min-width: 0; }
 .aihead { align-items: flex-start; } .aihead h2 { margin: 0; }
+
+/* the dock's update button: on phones there's no dock, and updating is for the PC Clippy runs on */
+#updatePill { width: 100%; }
+@media (max-width: 820px) { #updatePill { display: none !important; } }

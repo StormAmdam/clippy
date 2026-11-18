@@ -465,6 +465,29 @@ def overview():
     }
 
 
+# ───────────────────────── updates ─────────────────────────
+
+@app.get("/api/update")
+def update_status(request: Request, force: bool = False):
+    from . import updates
+    try:
+        this_computer_only(request)
+        local = True
+    except HTTPException:
+        local = False
+    return {**updates.status(force=force), "local": local}
+
+
+@app.post("/api/update/install")
+def update_install(request: Request):
+    from . import updates
+    this_computer_only(request)
+    try:
+        return updates.install()
+    except updates.UpdateError as e:
+        raise HTTPException(400, str(e))
+
+
 # ───────────────────────── looks, countdown themes, extensions ─────────────────────────
 
 BUILTIN_STYLES = [("beast", "Beast", "Comic, bouncy, tilted"), ("hormozi", "Hormozi", "Bold, colored keywords"),
