@@ -391,12 +391,13 @@ pages.make = async (el) => {
   const o = {...MAKE_DEFAULTS, ...store.get("make", {})};
   el.innerHTML = `
     <div class="ph"><div><h1>Make clips</h1><p>Paste a link or upload a video. Clippy finds the best moments, reframes them to 9:16 and adds captions, effects and sound.</p></div></div>
-    <section class="panel dropzone" id="mDrop">
+    <section class="panel stage dropzone" id="mDrop">
+      <h2 id="mStageT">Drop a video here, or paste a link</h2><p class="sub">YouTube links and video files from your computer both work.</p>
       <form class="linkbar" id="mForm"><input class="input big" id="mUrl" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="YouTube link or video file" placeholder="https://www.youtube.com/watch?v=…">
         <button class="btn primary lg" id="mGo">${icon("sparkles")} Make Clips</button>
         <button type="button" class="btn lg" id="mUp">${icon("upload")} Upload Video</button>
         <input type="file" id="mFile" accept="video/*,.mkv,.mov,.avi,.m4v,.ts" hidden></form>
-      <p class="small faint" style="margin:10px 0 0">Or drag a video file here. It takes a few minutes, and you can leave this page while it works.</p>
+      <p class="small faint" style="margin:12px 0 0">It takes a few minutes, and you can leave this page while it works.</p>
       <div class="drophint" aria-hidden="true">${icon("upload")}<b>Drop your video to make clips from it</b></div>
       <div id="mJob" style="margin-top:18px" class="hidden" aria-live="polite"></div>
     </section>
@@ -1172,7 +1173,7 @@ pages.ext = async (el) => {
     <section class="panel"><h2>Install from a link</h2><p class="sub">A GitHub repository or a link to a .zip file. Only install extensions from people you trust.</p>
       <form class="row" id="xAdd" style="gap:8px;margin-top:12px"><input class="input" id="xUrl" type="url" autocomplete="off" spellcheck="false" aria-label="Link to an extension" placeholder="https://github.com/someone/their-clippy-extension"><button class="btn">${icon("download")} Install</button></form></section>`;
   const adds = (a) => (a || []).map((x) => `<span class="tag">${esc(x)}</span>`).join("");
-  const meta = (x) => [x.version && "v" + x.version, x.author && "by " + x.author].filter(Boolean).join(" · ");
+  const meta = (x) => [x.version && "v" + x.version, x.author && "by " + x.author].filter(Boolean).join(", ");
   const codeTag = (on) => on ? `<span class="tag you">${icon("code")} Runs code</span>` : "";
   const after = async (msg) => { state.niches = null; await loadLooks(); toast(msg); await draw(); };   // new topics, looks, themes
   const draw = async () => {
