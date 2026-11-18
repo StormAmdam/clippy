@@ -80,33 +80,6 @@ def _pick_device(cfg: Settings, log) -> tuple[str, str, str | None]:
     return "cpu", "int8", paused
 
 
-def short_path(path: str) -> str:
-    """Windows' old-style 8.3 name for a path (C:\\Users\\JRG~1\\…), in plain letters. The path itself when there's
-    none."""
-    import ctypes
-    buf = ctypes.create_unicode_buffer(32768)
-    n = ctypes.windll.kernel32.GetShortPathNameW(str(path), buf, len(buf))
-    return buf.value if 0 < n < len(buf) else str(path)
-
-
-def load_whisper(name: str, device: str, compute: str, root: Path | None = None):
-    """faster-whisper's model from Clippy's folder (downloaded the first time). CTranslate2 can't open a path with
-    letters like ö or 测 on Windows (C:\\Users\\Jörg\\…), so there it gets the short path, or else the files from
-    memory."""
-    from faster_whisper import WhisperModel
-    from faster_whisper.utils import download_model
-    root = root or ROOT / "models" / "whisper"
-    path = name if os.path.isdir(name) else download_model(name, cache_dir=str(root))
-    opts = dict(device=device, compute_type=compute, cpu_threads=max(2, (os.cpu_count() or 4) // 2))
-    if sys.platform == "win32" and not str(path).isascii():
-        if (short := short_path(path)).isascii():
-            path = short
-        else:                                          # no short names on this drive: hand the files over
-            files = {f.name: f.read_bytes() for f in Path(path).iterdir() if f.is_file()}
-            return WhisperModel(str(path), files=files, **opts)
-    return WhisperModel(str(path), **opts)
-
-
 def audio_only(media: Path, workdir: Path, progress=lambda p, m: None) -> dict:
     """For videos without talking: just the loudness envelope, no Whisper (and the GPU stays untouched)."""
     env_file = workdir / "envelope.npy"
@@ -133,7 +106,7 @@ def transcribe(cfg: Settings, media: Path, workdir: Path, progress=lambda p, m: 
     duration = len(audio) / SR
     np.save(env_file, loudness_envelope(audio))
 
-    from faster_whisper import BatchedInferencePipeline
+    from faster_whisper import BatchedInferencePipeline, WhisperModel
 
     device, compute, paused = _pick_device(cfg, log)
     model = None
@@ -142,7 +115,10 @@ def transcribe(cfg: Settings, media: Path, workdir: Path, progress=lambda p, m: 
             try:
                 log(f"Whisper {cfg.whisper_model} on {device.upper()} ({compute})")
                 progress(0.02, f"Loading Whisper on {device.upper()}…")
-                model = load_whisper(cfg.whisper_model, device, compute)
+                # (folders like C:\Users\Jörg 测试 work: the Windows smoke test transcribes from one)
+                model = WhisperModel(cfg.whisper_model, device=device, compute_type=compute,
+                                     cpu_threads=max(2, (os.cpu_count() or 4) // 2),
+                                     download_root=str(ROOT / "models" / "whisper"))
                 common = dict(word_timestamps=True, vad_filter=True,
                               vad_parameters={"min_silence_duration_ms": 500})
                 if device == "cuda":

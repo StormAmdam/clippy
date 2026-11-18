@@ -125,12 +125,13 @@ if ($SmokeTest) {
   Write-Host "  the AI engine ended with Clippy"
 
   Step "Test suite with the bundled Python (temp files in the same kind of folder)"
-  Run $TPy -m pip install --disable-pip-version-check --no-warn-script-location pytest
+  # -X utf8: pip prints this folder's name, and fails without UTF-8 mode (the app's own pip calls use it too)
+  Run $TPy -X utf8 -m pip install --disable-pip-version-check --no-warn-script-location pytest
   Push-Location $Root
   & $TPy -X utf8 -m pytest -q -p no:cacheprovider tests --basetemp (Join-Path $Test "pytest temp")   # UTF-8 mode, as the app always runs
   $failed = $LASTEXITCODE
   Pop-Location
-  Run $TPy -m pip uninstall -y pytest pluggy iniconfig
+  Run $TPy -X utf8 -m pip uninstall -y pytest pluggy iniconfig
   if ($failed) { throw "Tests failed on Windows" }
 
   Step "Remove everything the smoke test downloaded"

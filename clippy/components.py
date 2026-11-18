@@ -279,7 +279,8 @@ def _gpu_status(cfg) -> dict:
 
 
 def _pip(*args: str) -> None:
-    r = subprocess.run([sys.executable, "-m", "pip", "--disable-pip-version-check", "--no-input", *args],
+    # -X utf8: pip prints Clippy's folder, which may hold letters the console's code page lacks (测), and then fails
+    r = subprocess.run([sys.executable, "-X", "utf8", "-m", "pip", "--disable-pip-version-check", "--no-input", *args],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", **hidden())
     if r.returncode:
         raise RuntimeError((r.stderr or r.stdout).strip()[-400:])

@@ -92,17 +92,14 @@ def words_of(text: str) -> set[str]:
 
 def test_transcription(app: Path, video: Path) -> None:
     step("2. Transcription on the CPU (Whisper tiny)")
-    from clippy import config, transcribe
-    from faster_whisper.utils import download_model
-    model_dir = download_model("tiny", cache_dir=str(app / "models" / "whisper"), local_files_only=True)
-    print(f"  model folder: {model_dir}")
-    try:                                                # for the record: does CTranslate2 need Clippy's workaround?
-        import ctranslate2
-        ctranslate2.models.Whisper(model_dir, device="cpu")
-        print("  (CTranslate2 opened this folder by itself)")
-    except Exception as e:
-        print(f"  (CTranslate2 can't open this folder by itself: {str(e)[:160]})")
-    print(f"  short path: {transcribe.short_path(model_dir)}")
+    import cv2
+
+    from clippy import config, reframe, transcribe
+    try:                    # for the record: Clippy loads the face model from memory; could OpenCV open the path?
+        cv2.FaceDetectorYN.create(str(reframe.FACE_MODEL), "", (320, 240))
+        print("  (OpenCV can open the face model from this folder by itself too)")
+    except cv2.error as e:
+        print(f"  (OpenCV can't open the face model from this folder by itself: {str(e).strip()[:160]})")
     work = Path(tempfile.mkdtemp(prefix="whisper-", dir=app / "data"))
     try:
         cfg = config.load({"whisper_model": "tiny", "whisper_device": "cpu"})
