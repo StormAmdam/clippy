@@ -11,7 +11,7 @@ $Root = (Resolve-Path "$PSScriptRoot\..\..").Path
 $Here = $PSScriptRoot
 $Out = Join-Path $Root "dist"
 $App = Join-Path $Out "Clippy"
-$Version = if ($env:CLIPPY_VERSION) { $env:CLIPPY_VERSION -replace '^v', '' } else { "0.1.0" }
+$Version = if ($env:CLIPPY_VERSION) { $env:CLIPPY_VERSION -replace '^v', '' } else { "0.2.0" }
 function Step($t) { Write-Host "`n=== $t" -ForegroundColor Cyan }
 function Run($exe) { & $exe @args; if ($LASTEXITCODE) { throw "$exe failed ($LASTEXITCODE)" } }
 

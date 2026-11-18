@@ -315,5 +315,5 @@ def test_a_clippy_started_from_a_terminal_says_how_to_stop_it(tmp_output, monkey
 
     from clippy import server
     monkeypatch.setitem(server.APP, "desktop", False)
-    r = TestClient(server.app, base_url="http://127.0.0.1:7860").post("/api/quit")
+    r = TestClient(server.app, base_url="http://127.0.0.1:7860", client=("127.0.0.1", 50000)).post("/api/quit")
     assert r.status_code == 400 and "Ctrl+C" in r.json()["detail"] and not server.APP["quit"]

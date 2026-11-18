@@ -163,7 +163,7 @@ def test_the_app_lists_styles_themes_and_shows_only_extension_pictures(ext_dir, 
     from clippy import server
     extensions.install_from_folder(COMMUNITY / "extra-caption-styles")
     extensions.install_from_folder(COMMUNITY / "save-copies")
-    c = TestClient(server.app, base_url="http://127.0.0.1:7860")
+    c = TestClient(server.app, base_url="http://127.0.0.1:7860", client=("127.0.0.1", 50000))
     assert [s["id"] for s in c.get("/api/styles").json()] == ["beast", "hormozi", "box", "clean", "pop", "subtitle"]
     assert "funny" in [t["id"] for t in c.get("/api/top-themes").json()]
     assert c.get("/ext/extra-caption-styles/pop.jpg").status_code == 200
@@ -174,3 +174,18 @@ def test_the_app_lists_styles_themes_and_shows_only_extension_pictures(ext_dir, 
     names = [r["id"] for r in c.get("/api/extensions").json()["installed"]]
     assert names == ["extra-caption-styles", "save-copies"]
     assert c.delete("/api/extensions/save-copies").json() == {"ok": True}
+
+
+def test_another_device_on_the_wifi_cannot_install_or_trust_extensions(ext_dir, tmp_output):
+    # with --host 0.0.0.0 a phone can use Clippy; it must not get code onto this PC
+    from fastapi.testclient import TestClient
+
+    from clippy import server
+    extensions.install_from_folder(COMMUNITY / "save-copies")
+    phone = TestClient(server.app, base_url="http://192.168.1.5:7860", client=("192.168.1.20", 50000))
+    for r in (phone.post("/api/extensions/install", json={"id": "more-topics"}),
+              phone.post("/api/extensions/save-copies/enable", json={"on": True, "trust": True}),
+              phone.delete("/api/extensions/save-copies"), phone.post("/api/quit")):
+        assert r.status_code == 403 and "computer Clippy runs on" in r.json()["detail"]
+    assert not next(r for r in extensions.installed() if r["id"] == "save-copies")["enabled"]
+    assert phone.get("/api/extensions").status_code == 200                     # looking is fine

@@ -275,9 +275,22 @@ UI_SEEN = {"t": 0.0}            # the app window polls /api/status; desktop.py q
 APP = {"desktop": False, "quit": False}     # desktop.py: Clippy runs as the app, and can quit when asked
 
 
+def this_computer_only(request: Request) -> None:
+    """Some things only the person at this PC may do, even when Clippy is open to the Wi-Fi (--host 0.0.0.0) for a
+    phone: installing or trusting extensions (their code would run on this PC) and quitting Clippy."""
+    host = request.client.host if request.client else ""
+    try:
+        local = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        local = host == "localhost"
+    if not local:
+        raise HTTPException(403, "Only possible on the computer Clippy runs on, not from another device.")
+
+
 @app.post("/api/quit")
-def quit_app():
+def quit_app(request: Request):
     """The app's Quit button: with Start at login on, closing the window leaves Clippy running in the background."""
+    this_computer_only(request)
     if not APP["desktop"]:
         raise HTTPException(400, "Clippy was started from a terminal: stop it there (Ctrl+C).")
     APP["quit"] = True
@@ -507,22 +520,25 @@ def extensions_catalog():
 
 
 @app.post("/api/extensions/install")
-def extensions_install(body: ExtensionIn):
+def extensions_install(body: ExtensionIn, request: Request):
     from . import extensions
+    this_computer_only(request)
     if body.url:
         return _ext_call(extensions.install_from_url, body.url)
     return _ext_call(extensions.install_from_catalog, body.id)
 
 
 @app.post("/api/extensions/{ext_id}/enable")
-def extensions_enable(ext_id: str, body: ExtensionIn):
+def extensions_enable(ext_id: str, body: ExtensionIn, request: Request):
     from . import extensions
+    this_computer_only(request)
     return _ext_call(extensions.set_enabled, ext_id, body.on, body.trust)
 
 
 @app.delete("/api/extensions/{ext_id}")
-def extensions_remove(ext_id: str):
+def extensions_remove(ext_id: str, request: Request):
     from . import extensions
+    this_computer_only(request)
     _ext_call(extensions.remove, ext_id)
     return {"ok": True}
 
