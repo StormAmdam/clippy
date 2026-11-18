@@ -36,6 +36,9 @@ class Settings:
     max_height: int = 1440            # 1440p gives sharper 9:16 crops than 1080p
     auto_cleanup_days: int = 0           # delete downloaded source videos after N days without activity (0 = never)
 
+    # ── The app
+    ui_theme: str = "caption"            # caption = caption print (bold, comic titles) | classic = the original look
+
     # ── Clips
     clips: int = 5
     min_seconds: int = 20

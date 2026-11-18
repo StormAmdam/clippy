@@ -1226,6 +1226,30 @@ pages.ext = async (el) => {
 };
 
 // ═════════════════════════ SETTINGS ═════════════════════════
+// themes: the stylesheet and browser-bar colour of each (the server puts the saved one in the page from the start)
+const UI_THEMES = [["caption", "Caption print", "Bold titles set like the captions in your shorts, sticker buttons, deep navy"],
+  ["classic", "Classic", "The original look: calm grey panels and a yellow accent"]];
+const THEME_FILES = {caption: ["/static/app.css", "#0f1320"], classic: ["/static/themes/classic.css", "#1b1c21"]};
+function applyTheme(v) {
+  const [css, colour] = THEME_FILES[v] || THEME_FILES.caption;
+  const link = $("link[data-theme-css]");
+  if (link && !link.href.endsWith(css)) link.href = css;
+  $('meta[name="theme-color"]')?.setAttribute("content", colour);
+}
+// a small picture of each theme, drawn the same whichever one is on
+const themeSample = (v) => v === "classic"
+  ? `<span aria-hidden="true" style="display:block;position:relative;height:96px;margin-bottom:10px;border-radius:10px;overflow:hidden;background:#1b1c21;border:1px solid #34363e">
+      <span style="position:absolute;left:14px;top:12px;font:600 26px/1 'Barlow Condensed',sans-serif;color:#ececef">Make clips</span>
+      <span style="position:absolute;left:14px;bottom:14px;width:46%;height:24px;border-radius:8px;background:#2a2c32;border:1px solid #42454e"></span>
+      <span style="position:absolute;right:14px;bottom:14px;padding:5px 11px;border-radius:8px;background:#ffe135;color:#1a1705;font:600 12.5px/1.2 Barlow,sans-serif">Make Clips</span></span>`
+  : `<span aria-hidden="true" style="display:block;position:relative;height:96px;margin-bottom:10px;border-radius:12px;overflow:hidden;background:#0f1320;border:2px solid #232a3d;
+      background-image:radial-gradient(circle,rgba(255,225,53,.18) 1px,transparent 1.5px);background-size:8px 8px">
+      <span style="position:absolute;left:14px;top:12px;display:inline-block;transform:rotate(-2deg);font:400 25px/1 'Luckiest Guy',sans-serif;color:#f4f6fb;
+        -webkit-text-stroke:6px #05070c;paint-order:stroke fill;text-shadow:2px 4px 0 #ffe135">MAKE CLIPS</span>
+      <span style="position:absolute;left:14px;bottom:14px;width:46%;height:24px;border-radius:10px;background:#0b0e18;border:2px solid #2f3851"></span>
+      <span style="position:absolute;right:14px;bottom:16px;padding:4px 10px;border-radius:9px;background:#ffe135;color:#1a1705;border:2px solid #05070c;
+        box-shadow:0 3px 0 #05070c;font:700 12.5px/1.2 Barlow,sans-serif">Make Clips</span></span>`;
+
 pages.settings = async (el) => {
   const [s, auto] = await Promise.all([api.get("/api/settings"), api.get("/api/autostart").catch(() => ({supported: false}))]);
   const orig = {...s}, cur = {...s};
@@ -1235,6 +1259,9 @@ pages.settings = async (el) => {
   const sel = (k, val, opts) => `<select class="input" id="s-${k}" data-k="${k}">${opts.map(([v, l]) => `<option value="${v}" ${String(val) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   el.innerHTML = `<div class="ph"><div><h1>Settings</h1><p>These apply to everything new you make. A single video's options still win.</p></div></div>
     <section class="panel" style="padding-top:4px;padding-bottom:16px">
+      <div class="set"><div><b>Theme</b><p>How Clippy looks. It changes straight away, here and in every window.</p></div>
+        <div class="choices wide" id="sTheme" role="radiogroup" aria-label="Theme">${UI_THEMES.map(([v, n, d]) => `<button type="button" role="radio" aria-checked="${(s.ui_theme || "caption") === v}"
+          class="choice ${(s.ui_theme || "caption") === v ? "on" : ""}" data-theme="${v}"><span class="tick" style="z-index:1">${icon("check")}</span>${themeSample(v)}<b>${n}</b><small>${d}</small></button>`).join("")}</div></div>
       <div class="set"><div><b>Start at login</b><p>${win ? "Keeps Clippy running in the background, also after you close its window, so scheduled Autopilot runs happen. Open Clippy as usual to see it." : "Keeps Clippy running in the background so scheduled Autopilot runs happen even when no terminal is open."}</p></div>
         <div>${auto.supported ? `<label class="switch"><span class="ic">${icon("power")}</span><span class="txt"><b>Start Clippy when you log in</b><small id="autoNote">${auto.enabled ? "On: Clippy starts automatically at login." : autoOff}</small></span><input type="checkbox" id="autoSw" ${auto.enabled ? "checked" : ""}></label>`
           : `<p class="muted">${auto.how === "windows-source" ? "Available in the Clippy app for Windows." : win ? "Not available here." : "Not available on this system. It needs systemd."}</p>`}
@@ -1300,6 +1327,15 @@ pages.settings = async (el) => {
     try { const saved = await api.post("/api/settings", changes); Object.assign(orig, saved); Object.assign(cur, saved); keyTyped = ""; $("#apiKey").value = ""; mark(); toast("Settings saved"); }
     catch (e) { fail(e); mark(); }
   };
+  $$("#sTheme .choice").forEach((b) => b.onclick = async () => {
+    const v = b.dataset.theme;
+    if (v === (cur.ui_theme || "caption")) return;
+    try { await api.post("/api/settings", {ui_theme: v}); } catch (err) { fail(err); return; }
+    orig.ui_theme = cur.ui_theme = v;                 // saved already: not an unsaved change
+    applyTheme(v);
+    $$("#sTheme .choice").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); });
+    toast(`Theme: ${UI_THEMES.find((t) => t[0] === v)[1]}`);
+  });
   $("#quitApp")?.addEventListener("click", async () => {
     const busy = state.status?.running || state.status?.queued;
     const yes = await confirmDialog({title: "Quit Clippy?", confirm: "Quit", danger: Boolean(busy),

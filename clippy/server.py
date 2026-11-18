@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -856,7 +856,18 @@ def index(state: str | None = None, code: str | None = None, error: str | None =
             except Exception as e:
                 from urllib.parse import quote
                 return RedirectResponse("/?yt=error&msg=" + quote(str(e)[:300]) + "#autopilot")
-    return FileResponse(STATIC / "index.html")
+    return HTMLResponse(page_html())
+
+
+THEMES = {"caption": ("/static/app.css", "#0f1320"), "classic": ("/static/themes/classic.css", "#1b1c21")}
+
+
+def page_html() -> str:
+    """The app's page, with the chosen theme's stylesheet already in it (so it never shows the other one first)."""
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    css, colour = THEMES.get(config.load().ui_theme, THEMES["caption"])
+    html = html.replace('href="/static/app.css" data-theme-css', f'href="{css}" data-theme-css', 1)
+    return html.replace('<meta name="theme-color" content="#0f1320">', f'<meta name="theme-color" content="{colour}">', 1)
 
 
 def _already_running(url: str) -> bool:

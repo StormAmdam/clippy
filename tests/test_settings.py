@@ -99,3 +99,18 @@ def test_detects_clippy_already_running():
     finally:
         httpd.shutdown()
     assert server._already_running(f"http://127.0.0.1:{httpd.server_port}") is False
+
+
+def test_the_page_comes_with_the_chosen_theme(tmp_output):
+    from fastapi.testclient import TestClient
+
+    from clippy import config, server
+    c = TestClient(server.app, base_url="http://127.0.0.1:7860")
+    page = c.get("/").text
+    assert 'href="/static/app.css" data-theme-css' in page and 'content="#0f1320"' in page      # caption print
+    assert c.post("/api/settings", json={"ui_theme": "classic"}).json()["ui_theme"] == "classic"
+    page = c.get("/").text
+    assert 'href="/static/themes/classic.css" data-theme-css' in page and 'content="#1b1c21"' in page
+    assert c.get("/static/themes/classic.css").status_code == 200
+    config.save_ui_settings({"ui_theme": "something-else"})
+    assert 'href="/static/app.css" data-theme-css' in c.get("/").text                        # unknown: the default
