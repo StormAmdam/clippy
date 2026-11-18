@@ -1097,7 +1097,8 @@ pages.settings = async (el) => {
     <section class="panel" style="padding-top:4px;padding-bottom:16px">
       <div class="set"><div><b>Start at login</b><p>${win ? "Keeps Clippy running in the background, also after you close its window, so scheduled Autopilot runs happen. Open Clippy as usual to see it." : "Keeps Clippy running in the background so scheduled Autopilot runs happen even when no terminal is open."}</p></div>
         <div>${auto.supported ? `<label class="switch"><span class="ic">${icon("power")}</span><span class="txt"><b>Start Clippy when you log in</b><small id="autoNote">${auto.enabled ? "On: Clippy starts automatically at login." : autoOff}</small></span><input type="checkbox" id="autoSw" ${auto.enabled ? "checked" : ""}></label>`
-          : `<p class="muted">${auto.how === "windows-source" ? "Available in the Clippy app for Windows." : win ? "Not available here." : "Not available on this system. It needs systemd."}</p>`}</div></div>
+          : `<p class="muted">${auto.how === "windows-source" ? "Available in the Clippy app for Windows." : win ? "Not available here." : "Not available on this system. It needs systemd."}</p>`}
+          ${auto.can_quit ? `<div class="row" style="gap:10px;margin-top:12px"><button type="button" class="btn sm quiet" id="quitApp">${icon("power")} Quit Clippy</button><span class="small muted">Stops Clippy until you open it again${auto.enabled ? " or log in" : ""}.</span></div>` : ""}</div></div>
       <div class="set"><div><b>AI that picks the clips</b><p>Clippy uses its built-in AI (AI &amp; Tools), or finds llama.cpp, Ollama, LM Studio, Jan, KoboldCpp or vLLM by itself${win ? "" : ", on this computer or on Windows when you use WSL"}. Choose a server or model here only if you want a specific one.</p></div>
         <div class="stack"><div class="aibox" id="aiBox" aria-live="polite"><span class="small muted">Looking for AI servers…</span></div>
           <label class="field"><span>Server address (auto finds one by itself)</span><input class="input" data-k="llm_url" autocomplete="off" spellcheck="false" value="${esc(s.llm_url)}" placeholder="auto"></label>
@@ -1159,6 +1160,16 @@ pages.settings = async (el) => {
     try { const saved = await api.post("/api/settings", changes); Object.assign(orig, saved); Object.assign(cur, saved); keyTyped = ""; $("#apiKey").value = ""; mark(); toast("Settings saved"); }
     catch (e) { fail(e); mark(); }
   };
+  $("#quitApp")?.addEventListener("click", async () => {
+    const busy = state.status?.running || state.status?.queued;
+    const yes = await confirmDialog({title: "Quit Clippy?", confirm: "Quit", danger: Boolean(busy),
+      body: busy ? "A video is being made right now. Quitting stops it." : "Scheduled Autopilot runs wait until Clippy runs again."});
+    if (!yes) return;
+    try { await api.post("/api/quit"); } catch (err) { fail(err); return; }
+    leaveGuard = null; timers.forEach(clearInterval); timers = []; clearInterval(globalTimer);
+    document.body.innerHTML = `<div class="panel empty" style="margin:15vh auto;max-width:440px"><div class="ic">${icon("power")}</div><h3>Clippy has quit</h3><p>You can close this window. ${win ? "Open Clippy again from the Start menu." : "Start it again with clippy app."}</p></div>`;
+    setTimeout(() => window.close(), 1500);
+  });
   $("#autoSw")?.addEventListener("change", async (e) => {
     const on = e.target.checked;
     try { const r = await api.post("/api/autostart", {enabled: on}); $("#autoNote").textContent = r.enabled ? (win ? "On: Clippy starts at login, and keeps running after you close its window." : "On: Clippy starts automatically next time you log in.") : autoOff; toast(r.enabled ? "Clippy will start at login" : "Start at login turned off"); }
@@ -1169,5 +1180,5 @@ pages.settings = async (el) => {
 // ───────────────────────── boot ─────────────────────────
 hydrateIcons();
 refreshGlobal();
-setInterval(refreshGlobal, 5000);
+const globalTimer = setInterval(refreshGlobal, 5000);
 route();

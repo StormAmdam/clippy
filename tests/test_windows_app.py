@@ -281,3 +281,39 @@ def test_read_only_files_are_deleted_too(tmp_output):
 def test_settings_saved_by_notepad_with_a_bom_still_load(tmp_output):
     config.settings_file().write_bytes('\ufeff{"clips": 3, "caption_color": "#FFFFFF"}'.encode("utf-8"))
     assert config.load().clips == 3
+
+
+# ───────────────────────── quitting a Clippy that runs in the background ─────────────────────────
+
+def test_the_quit_button_ends_a_background_clippy(monkeypatch, tmp_path):
+    import httpx
+
+    from clippy import server
+    port = _free_port()
+    monkeypatch.setattr(desktop, "PORTS", [port])
+    monkeypatch.setattr(desktop, "PORT_FILE", tmp_path / "port.txt")
+    monkeypatch.setattr(desktop, "open_window", lambda url: pytest.fail("--background must not open a window"))
+    monkeypatch.setitem(server.APP, "desktop", False)
+    monkeypatch.setitem(server.APP, "quit", False)
+    ended = []
+    th = threading.Thread(target=lambda: ended.append(desktop.main(["--background"])), daemon=True)
+    th.start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        if desktop.PORT_FILE.exists():
+            break
+        time.sleep(0.1)
+    assert desktop.PORT_FILE.read_text() == str(port)
+    assert httpx.get(base + "/api/autostart").json()["can_quit"] is True
+    assert httpx.post(base + "/api/quit").json() == {"ok": True}
+    th.join(20)
+    assert ended == [0]
+
+
+def test_a_clippy_started_from_a_terminal_says_how_to_stop_it(tmp_output, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from clippy import server
+    monkeypatch.setitem(server.APP, "desktop", False)
+    r = TestClient(server.app, base_url="http://127.0.0.1:7860").post("/api/quit")
+    assert r.status_code == 400 and "Ctrl+C" in r.json()["detail"] and not server.APP["quit"]

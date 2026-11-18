@@ -239,7 +239,7 @@ def save_settings(body: dict):
 @app.get("/api/autostart")
 def autostart_status():
     from . import autostart
-    return autostart.status()
+    return {**autostart.status(), "can_quit": APP["desktop"]}
 
 
 class AutostartIn(BaseModel):
@@ -261,6 +261,16 @@ _llm_cache = {"t": 0.0, "ok": False, "model": "", "server": "", "error": ""}
 
 
 UI_SEEN = {"t": 0.0}            # the app window polls /api/status; desktop.py quits when it stops
+APP = {"desktop": False, "quit": False}     # desktop.py: Clippy runs as the app, and can quit when asked
+
+
+@app.post("/api/quit")
+def quit_app():
+    """The app's Quit button: with Start at login on, closing the window leaves Clippy running in the background."""
+    if not APP["desktop"]:
+        raise HTTPException(400, "Clippy was started from a terminal: stop it there (Ctrl+C).")
+    APP["quit"] = True
+    return {"ok": True}
 
 
 def work_in_progress() -> bool:

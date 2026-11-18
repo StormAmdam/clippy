@@ -156,11 +156,14 @@ def main(argv: list[str] | None = None) -> int:
         pass
     print(f"Clippy is running at {url}" + (" (in the background)" if background else ""), flush=True)
     server.UI_SEEN["t"] = time.time()
+    server.APP["desktop"] = True
     win = None if background else open_window(url)
     try:
-        while True:
-            time.sleep(5)
-            if background:
+        tick = 0
+        while not server.APP["quit"]:                  # the Quit button in Settings
+            time.sleep(1)
+            tick += 1
+            if background or tick % 5:
                 continue
             window_gone = win is None or win.poll() is not None
             idle = time.time() - server.UI_SEEN["t"] > IDLE_QUIT
