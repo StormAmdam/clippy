@@ -36,7 +36,7 @@ QUEUE: "queue.Queue[str]" = queue.Queue()
 @asynccontextmanager
 async def lifespan(app):
     # background workers start with the web server (not on import, so tests stay quiet)
-    for target in (_worker, _scheduler, _publisher):
+    for target in (_worker, _scheduler, _publisher, _watcher):
         threading.Thread(target=target, daemon=True).start()
     yield
 
@@ -339,7 +339,10 @@ def settings():
 
 @app.post("/api/settings")
 def save_settings(body: dict):
+    from . import watcher
     try:
+        if "watch_folder" in body:
+            watcher.check_folder(body["watch_folder"])     # a clear message now, not a folder that's never watched
         config.save_ui_settings(body)
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
@@ -812,6 +815,26 @@ def _profile_due(p: dict, now: float) -> bool:
     """A scheduled profile whose interval has passed since its last run."""
     h = float(p.get("auto_every_hours") or 0)
     return h > 0 and now - float(p.get("last_run") or 0) >= h * 3600
+
+
+def _watcher():
+    """New recordings in the watched folder become shorts (clippy/watcher.py)."""
+    from . import watcher
+
+    def queue_job(path: str, title: str, preset: str) -> str:
+        return _new_job(url=path, title=title, options={"preset": preset} if preset else {})["id"]
+    while True:
+        try:
+            watcher.scan_once(queue_job, log=lambda m: print(m, flush=True))
+        except Exception:                                  # a bad moment (disk unplugged): try again next time
+            traceback.print_exc()
+        time.sleep(watcher.POLL)
+
+
+@app.get("/api/watch")
+def watch_status():
+    from . import watcher
+    return watcher.status()
 
 
 def _scheduler():

@@ -1599,6 +1599,10 @@ pages.settings = async (el) => {
       <div class="set"><div><b>Saved styles</b><p>Named looks for Make Clips, Find a Quote and Autopilot channels. Save one from Make Clips.</p></div>
         <div id="sPresets">${PRESETS.length ? `<div class="rows">${PRESETS.map((pr) => `<div class="rowi"><div class="t"><b>${esc(pr.name)}</b><small>${esc(STYLES.find((x) => x[0] === pr.settings.caption_style)?.[1] || pr.settings.caption_style)} captions, ${pr.settings.teaser ? "teaser" : "no teaser"}, ${pr.settings.sfx ? "sound effects" : "no sound effects"}</small></div>
           <button type="button" class="btn sm quiet danger" data-delpreset="${esc(pr.id)}" data-name="${esc(pr.name)}">${icon("trash")} Delete</button></div>`).join("")}</div>` : `<p class="muted">None yet.</p>`}</div></div>
+      <div class="set"><div><b>Watch a recording folder</b><p>New recordings that land there become shorts by themselves, for example from OBS. Recordings already there are left alone. Clippy needs to be running.</p></div>
+        <div class="stack"><label class="field"><span>Folder</span><input class="input" data-k="watch_folder" type="text" autocomplete="off" spellcheck="false" value="${esc(s.watch_folder || "")}" placeholder="${win ? "C:\\Users\\you\\Videos\\OBS" : "/home/you/Videos/OBS"} (empty: don't watch)"></label>
+          <label class="field"><span>Make them with</span><select class="input" data-k="watch_preset">${presetOptions(s.watch_preset, "Your settings")}</select></label>
+          <div class="small muted" id="sWatch" aria-live="polite"></div></div></div>
       <div class="set"><div><b>Updates</b><p id="sVersion">You have Clippy ${esc(state.version || "")}.</p></div>
         <div class="stack"><label class="switch"><span class="ic">${icon("refresh")}</span><span class="txt"><b>Check for updates when Clippy opens</b><small>It asks GitHub for a newer version and tells you. It never updates without you.</small></span><input type="checkbox" data-k="check_updates" ${s.check_updates ? "checked" : ""}></label>
           <div class="row"><button type="button" class="btn sm" id="sCheck">${icon("refresh")} Check Now</button><span class="small muted" id="sCheckNote"></span></div></div></div>
@@ -1677,6 +1681,13 @@ pages.settings = async (el) => {
     toast(`Theme: ${UI_THEMES.find((t) => t[0] === v)[1]}`);
   });
   api.get("/api/update").then((u) => { state.version = u.current; $("#sVersion") && ($("#sVersion").textContent = `You have Clippy ${u.current}.`); }).catch(() => {});
+  api.get("/api/watch").then((w) => {
+    const box = $("#sWatch"); if (!box) return;
+    if (w.problem) { box.innerHTML = `<span class="err-text">${esc(w.problem)}</span>`; return; }
+    if (!w.watching) { box.textContent = "Not watching a folder."; return; }
+    box.innerHTML = `Watching this folder.${w.waiting.length ? ` Waiting for ${w.waiting.length} recording${w.waiting.length > 1 ? "s" : ""} to finish.` : ""}`
+      + (w.recent.length ? `<br>Lately: ${w.recent.map((r) => `${esc(r.file)}${r.error ? ` (${esc(r.error)})` : ""}`).join(", ")}` : "");
+  }).catch(() => {});
   $$("[data-delpreset]").forEach((b) => b.onclick = async () => {
     if (!await confirmDialog({title: `Delete the style “${b.dataset.name}”?`, body: "Shorts already made keep their look. Autopilot channels using it go back to their own caption style.", confirm: "Delete Style", danger: true})) return;
     try { await api.del(`/api/presets/${encodeURIComponent(b.dataset.delpreset)}`); await loadPresets(); toast("Style deleted"); route(); } catch (e) { fail(e); }
