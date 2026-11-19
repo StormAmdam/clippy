@@ -564,3 +564,7 @@ details.more > div { padding: 0 14px 14px; }
 .focusbar { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; margin-top: 14px; }
 .focusbar > span { font-weight: 700; font-size: 14px; color: var(--dim); white-space: nowrap; }
 @media (max-width: 720px) { .focusbar { grid-template-columns: 1fr; gap: 6px; } }
+
+/* Review on a phone: the QR code */
+.qr { display: grid; place-items: center; }
+.qr img { width: 232px; height: 232px; border-radius: 14px; background: #fff; padding: 8px; }

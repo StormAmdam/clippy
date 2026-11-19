@@ -148,6 +148,18 @@ jobs:
           $u = Invoke-RestMethod "http://127.0.0.1:$port/api/update?force=true"
           "Clippy $($u.current) sees $($u.latest): newer $($u.newer), can install $($u.can_install), local $($u.local)"
           if (-not ($u.newer -and $u.can_install -and $u.local)) { throw "The app doesn't offer the update: $($u | ConvertTo-Json -Compress)" }
+          # Review on a phone: the limited server opens on the network, wants the QR key, and closes again
+          $ph = Invoke-RestMethod -Method Post "http://127.0.0.1:$port/api/phone" -ContentType "application/json" -Body '{"on": true}'
+          if (-not $ph.on) { throw "Phone review didn't turn on: $($ph | ConvertTo-Json -Compress)" }
+          if ($ph.address) {
+            $no = Invoke-WebRequest "$($ph.address)/api/review" -SkipHttpErrorCheck
+            if ($no.StatusCode -ne 401) { throw "Phone review answered without the key ($($no.StatusCode))" }
+            $phoneSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+            Invoke-WebRequest $ph.url -WebSession $phoneSession | Out-Null
+            Invoke-RestMethod "$($ph.address)/api/review" -WebSession $phoneSession | Out-Null
+            "Phone review works at $($ph.address) with the QR key, and refuses requests without it"
+          } else { "No network address on this machine: phone review skipped" }
+          Invoke-RestMethod -Method Post "http://127.0.0.1:$port/api/phone" -ContentType "application/json" -Body '{"on": false}' | Out-Null
           Invoke-RestMethod -Method Post "http://127.0.0.1:$port/api/settings" -ContentType "application/json" -Body '{"clips": 9}' | Out-Null
           $before = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $py } | ForEach-Object { $_.ProcessId })
           Invoke-RestMethod -Method Post "http://127.0.0.1:$port/api/update/install" | Out-Null

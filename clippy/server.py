@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -829,6 +829,41 @@ def _watcher():
         except Exception:                                  # a bad moment (disk unplugged): try again next time
             traceback.print_exc()
         time.sleep(watcher.POLL)
+
+
+class PhoneIn(BaseModel):
+    on: bool
+
+
+@app.get("/api/phone")
+def phone_status(request: Request):
+    """Review on a phone: is it open, where, and which phones came by. Only here: the address holds the secret."""
+    from . import phone
+    this_computer_only(request)
+    return phone.status()
+
+
+@app.post("/api/phone")
+def phone_set(body: PhoneIn, request: Request):
+    from . import phone
+    this_computer_only(request)
+    try:
+        return phone.start() if body.on else phone.stop()
+    except phone.PhoneError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/phone/qr.svg")
+def phone_qr(request: Request):
+    from . import phone
+    this_computer_only(request)
+    s = phone.status()
+    if not s.get("url"):
+        raise HTTPException(409, "Turn on phone review first.")
+    try:
+        return Response(phone.qr_svg(s["url"]), media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
+    except ImportError:                              # an install from before the QR library: the address still works
+        raise HTTPException(501, "No QR code on this install: type the address into the phone instead.")
 
 
 @app.get("/api/watch")

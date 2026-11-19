@@ -1009,10 +1009,12 @@ const RV_TABS = [["pending", "Waiting"], ["approved,uploading,failed", "Publishi
 pages.review = async (el) => {
   let tab = params().get("tab") || "pending";
   if (!RV_TABS.some(([k]) => k === tab)) tab = "pending";
-  el.innerHTML = `<div class="ph"><div><h1>Review</h1><p>Watch each short, fix the title or description if you want, then approve. Approved shorts publish automatically after 10 seconds.</p></div></div>
+  el.innerHTML = `<div class="ph"><div><h1>Review</h1><p>Watch each short, fix the title or description if you want, then approve. Approved shorts publish automatically after 10 seconds.</p></div>
+      ${state.status?.local === false ? "" : `<button type="button" class="btn" id="rvPhone">${icon("phone")} Review on Your Phone</button>`}</div>
     <div class="row between" style="margin-bottom:18px"><div class="seg" id="rvTabs" role="tablist" aria-label="Filter shorts"></div>
       <div class="keys" aria-hidden="true"><span><kbd>J</kbd> <kbd>K</kbd> Next and previous</span><span><kbd>A</kbd> Approve</span><span><kbd>R</kbd> Reject</span></div></div>
     <div class="stack" id="rvList" style="gap:16px"></div>`;
+  $("#rvPhone")?.addEventListener("click", openPhone);
   let cur = 0, sig = "";
   const tabs = () => {
     const c = state.overview?.review || {};
@@ -1359,6 +1361,50 @@ async function openQuote(video, {after = () => {}} = {}) {
   };
   draw();
   $("#qqFind", m).focus();
+}
+
+// ───────────────────────── review on a phone ─────────────────────────
+async function openPhone() {
+  let s;
+  try { s = await api.get("/api/phone"); } catch (e) { fail(e); return; }
+  const m = openModal(`<div class="mh"><div class="row between"><h2>Review on your phone</h2><button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div></div>
+    <div class="mb" id="phBody"></div>
+    <div class="mf"><span class="grow small muted" id="phNote"></span><button type="button" class="btn quiet" data-close>Close</button><span id="phAct"></span></div>`,
+    {label: "Review on your phone", small: true});
+  $$("[data-close]", m).forEach((b) => b.onclick = () => closeModal());
+  let t = null;
+  const draw = () => {
+    const body = $("#phBody", m);
+    if (!body) { clearInterval(t); return; }
+    const caveat = s.wsl ? `<div class="note err" style="margin-top:12px"><div class="ic">${icon("alert")}</div><div><b>Clippy runs inside WSL</b><p>Phones usually can't reach programs inside WSL. It works when WSL uses mirrored networking: add <code>networkingMode=mirrored</code> under <code>[wsl2]</code> in <code>.wslconfig</code> in your Windows user folder, then run <code>wsl --shutdown</code> and start Clippy again.</p></div></div>`
+      : s.windows ? `<p class="small muted" style="margin:12px 0 0">If Windows asks whether Clippy may use the network, choose <b>Allow</b> (private networks only is enough).</p>` : "";
+    if (!s.on) {
+      body.innerHTML = `<p class="muted" style="margin:6px 0 0">Watch, approve and save the shorts waiting here from your phone, on the same Wi-Fi.</p>
+        <p class="small muted">Clippy opens a separate, limited door for this: phones can only see Review, approve, reject and save. They can't change settings or make clips, and only a phone that scanned the code gets in.</p>${caveat}`;
+      $("#phAct", m).innerHTML = `<button type="button" class="btn primary" id="phOn" ${s.problem ? "disabled" : ""}>${icon("phone")} Turn On</button>`;
+      $("#phNote", m).textContent = s.problem || "";
+      $("#phOn", m)?.addEventListener("click", async () => { try { s = await api.post("/api/phone", {on: true}); draw(); poll(); } catch (e) { fail(e); } });
+      return;
+    }
+    const seen = (s.devices || [])[0];
+    body.innerHTML = `<p class="muted" style="margin:6px 0 12px">Scan this with your phone's camera. The phone has to be on the same Wi-Fi as this PC.</p>
+      <div class="qr"><img src="/api/phone/qr.svg?t=${Date.now()}" alt="QR code that opens Review on a phone" width="232" height="232" id="phQr"></div>
+      <p class="small muted" style="margin:12px 0 0;text-align:center" id="phAddr">It opens <b class="num">${esc(s.address)}</b> on the phone, with a key only this code has.</p>
+      <p class="small" style="margin:14px 0 0;text-align:center" aria-live="polite">${seen ? `${icon("checkCircle")} Connected: <b>${esc(seen.kind)}</b> at ${esc(seen.ip)}, ${rel(seen.seen)}` : `<span class="spin" style="width:12px;height:12px;display:inline-block;vertical-align:-1px"></span> Waiting for your phone…`}</p>${caveat}`;
+    $("#phQr", m).onerror = () => {                   // no QR library on this install: the whole link, to type in
+      $(".qr", m).remove();
+      $("#phAddr", m).innerHTML = `Type this into the phone's browser:<br><b class="num break">${esc(s.url)}</b>`;
+    };
+    $("#phAct", m).innerHTML = `<button type="button" class="btn" id="phOff">${icon("stop")} Turn Off</button>`;
+    $("#phNote", m).textContent = "Turning it off logs phones out.";
+    $("#phOff", m).onclick = async () => { try { s = await api.post("/api/phone", {on: false}); draw(); toast("Phone review is off"); } catch (e) { fail(e); } };
+  };
+  const poll = () => { clearInterval(t); t = setInterval(async () => {
+    if (!document.body.contains(m)) { clearInterval(t); return; }
+    try { const n = await api.get("/api/phone"); const changed = JSON.stringify(n.devices) !== JSON.stringify(s.devices) || n.on !== s.on; s = n; if (changed) draw(); } catch {}
+  }, 2000); };
+  draw();
+  if (s.on) poll();
 }
 
 // ═════════════════════════ LIBRARY ═════════════════════════
