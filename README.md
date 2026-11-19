@@ -74,7 +74,7 @@ and save shorts from the couch. The phone gets a separate, limited page: it can'
 1. Download **Clippy-Setup-win64.exe** from the [latest release](https://github.com/StormAmdam/clippy/releases/latest)
    and run it. No admin rights needed. (Prefer no installer? The portable zip works from any folder.)
    Windows may say **"Windows protected your PC"** because the installer isn't code-signed yet: click
-   **More info**, then **Run anyway**. ([Why, and what's being done about it](docs/code-signing.md).)
+   **More info**, then **Run anyway**. ([Why](docs/code-signing.md).)
 2. Clippy opens in its own window. On **AI & Tools**, press **Set Up Everything**: it downloads the video tools,
    the speech model and an AI model that fits your PC, or uses Ollama or LM Studio if you already run one.
 3. Paste a YouTube link and press **Make Clips**.
@@ -327,17 +327,17 @@ Those services have their own privacy policies: [YouTube and Google](https://pol
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org). (Applied for: Windows releases are signed from the first release after
-approval. Earlier releases aren't signed; see [why Windows warns](docs/code-signing.md).)
+Windows releases aren't code-signed yet, which is why Windows warns about the installer ([why](docs/code-signing.md)).
+Clippy applied to [SignPath Foundation](https://signpath.org)'s free signing for open-source projects in November
+2026; they sign projects once they're more widely known, so Clippy will apply again later.
 
 - Committers and reviewers: [StormAmdam](https://github.com/StormAmdam)
 - Approvers: [StormAmdam](https://github.com/StormAmdam)
 
 Every Windows release is built from this repository's source by GitHub Actions
-([`windows-app.yml`](.github/workflows/windows-app.yml)), and the project owner approves each signing request.
-Changes from others (pull requests) are reviewed before they're merged. Clippy can be removed completely: the Windows
-uninstaller (Settings → Apps), or `clippy uninstall` on Linux.
+([`windows-app.yml`](.github/workflows/windows-app.yml)), with a SHA-256 checksum on the release page that Clippy's
+own updater checks. Changes from others (pull requests) are reviewed before they're merged. Clippy can be removed
+completely: the Windows uninstaller (Settings → Apps), or `clippy uninstall` on Linux.
 
 ## Copyright
 

@@ -4,6 +4,16 @@ Windows shows **"Windows protected your PC"** for Clippy's installer because it 
 certificate. Signing proves who made the file and that nobody changed it. It needs a certificate from a trusted
 authority, so it can't be done in the code alone.
 
+## Where it stands
+
+Clippy applied to SignPath Foundation on 18 November 2026. On 19 November they said no for now: the Foundation
+program is for projects with established public trust and visibility (GitHub stars, forks, contributors, articles,
+discussions on Reddit, YouTube and the like, or institutional backing), and they invited Clippy to apply again once
+it has broader recognition. Their paid plan was offered instead; Clippy stays with free options.
+
+Until then: each release can be submitted to Microsoft as described at the end ("Until then"), and Windows'
+SmartScreen also warns less as more people download a release.
+
 ## The free route: SignPath Foundation
 
 [SignPath Foundation](https://signpath.org/) signs open-source projects for free, straight from GitHub Actions.
