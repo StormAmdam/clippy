@@ -325,6 +325,8 @@ a.rowi:hover .t > b { color: var(--yellow); }
 @keyframes pop { from { opacity: 0; transform: scale(.98); } }
 .modal .mh { padding: 20px 24px 0; }
 .modal .mh h2 { margin: 0; font-size: 19px; }
+.modal .mh > .row.between { flex-wrap: nowrap; align-items: flex-start; }   /* the close button stays top right */
+.modal .mh > .row.between > h2 { flex: 1 1 auto; min-width: 0; }
 .modal .mb { padding: 8px 24px 20px; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
 .modal .mf { display: flex; gap: 10px; align-items: center; padding: 14px 24px; border-top: 1px solid var(--line); background: #212227; }
 .modal .mf .grow { flex: 1; }
