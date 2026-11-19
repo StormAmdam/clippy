@@ -291,3 +291,18 @@ def test_the_server_queues_a_quote_as_a_job(tmp_output, monkeypatch):
     assert c.get("/api/transcript/_auto").status_code == 400
     r = c.post("/api/transcript/abc123/clip", json={"i0": 8, "i1": 20, "title": "Mine"})
     assert r.json() == {"id": "j2"} and made[0]["kind"] == "manual" and made[0]["options"]["i1"] == 20
+
+
+def test_any_kind_of_uploaded_video_counts_as_the_source(tmp_output):
+    d = _project(tmp_output)
+    (d / "source.mp4").rename(d / "source.TS")                      # an OBS .ts, uploaded or watched
+    assert quickfix.info("abc123/clips/01-short.mp4")["source"] == "abc123/source.TS"
+
+
+def test_a_clip_from_the_transcript_records_its_whole_look(tmp_output, fake_render):
+    from clippy import config, presets
+    _project(tmp_output)
+    config.save_ui_settings({"caption_scale": 1.3})
+    r = quickfix.make_clip("abc123", 8, 20)
+    side = json.loads(pipeline.sidecar(tmp_output / r["clips"][0]["file"]).read_text())
+    assert set(presets.KEYS) <= set(side["overrides"]) and side["overrides"]["caption_scale"] == 1.3

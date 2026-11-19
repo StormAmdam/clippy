@@ -1288,11 +1288,11 @@ async function openQuote(video, {after = () => {}} = {}) {
   const draw = () => {
     const q = st.q.trim(), ql = q.toLowerCase(), r = range();
     const shown = d.lines.filter((l) => !ql || l.text.toLowerCase().includes(ql));
-    const rx = q ? new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi") : null;
+    const rx = q ? new RegExp("(" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi") : null;   // on the plain text
     $("#qqCount", m).textContent = q ? `${shown.length} line${shown.length === 1 ? "" : "s"} with “${q}”` : `${d.lines.length} lines. Tap one to play it.`;
     $("#qqLines", m).innerHTML = shown.length ? shown.map((l) => {
       const cls = [r && l.n >= r[0] && l.n <= r[1] ? "in" : "", l.n === st.first ? "first" : "", l.n === st.last ? "last" : ""].join(" ");
-      const txt = rx ? esc(l.text).replace(rx, (x) => `<mark>${x}</mark>`) : esc(l.text);
+      const txt = rx ? l.text.split(rx).map((part, k) => k % 2 ? `<mark>${esc(part)}</mark>` : esc(part)).join("") : esc(l.text);
       return `<div class="ql ${cls}" data-n="${l.n}"><button type="button" class="ql-x" data-seek="${l.n}"><span class="num faint">${fmtT(l.s)}</span> ${txt}</button>
         <span class="ql-b"><button type="button" class="btn sm ${l.n === st.first ? "on" : ""}" data-first="${l.n}" aria-pressed="${l.n === st.first}">First</button><button type="button" class="btn sm ${l.n === st.last ? "on" : ""}" data-last="${l.n}" aria-pressed="${l.n === st.last}">Last</button></span></div>`;
     }).join("") : `<p class="small muted" style="margin:8px">Nothing like that is said in this video. Try another word.</p>`;

@@ -218,8 +218,10 @@ def _run_profile(pid: str, run_pipeline, progress, log) -> dict:
         url = "https://www.youtube.com/watch?v=" + r["id"]
         log(f"  ▶ [{r['score']}] {r['title']}  ({r.get('channel')})")
         lo, span = 0.2 + 0.8 * vi / len(chosen), 0.8 / len(chosen)
-        look = {"preset": p["preset"]} if p.get("preset") else \
+        from . import presets
+        look = {"preset": p["preset"]} if p.get("preset") and presets.get(p["preset"]) else \
             {"caption_style": p["caption_style"], "highlight_color": p["highlight_color"]}   # a saved style decides
+                                                                                           # (deleted: its own look)
         overrides = {"clips": p["clips_per_video"], "min_seconds": p["min_seconds"], "max_seconds": p["max_seconds"],
                      **look, "clips_dir": f"clips-{pid}"}
         summary = run_pipeline(url, overrides,

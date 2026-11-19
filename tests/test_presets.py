@@ -72,3 +72,16 @@ def test_styles_through_the_server(tmp_output):
     assert c.get("/api/presets").json()["presets"][0]["name"] == "Podcast"
     assert c.post("/api/presets", json={"name": " ", "settings": {}}).status_code == 400
     assert c.delete(f"/api/presets/{pid}").json() == {"ok": True} and c.get("/api/presets").json()["presets"] == []
+
+
+def test_a_deleted_style_gives_the_channel_its_own_look_back(tmp_output, monkeypatch):
+    p = presets.save("Gaming", {"caption_style": "beast"})
+    prof = autopilot.save_profile({"name": "Games", "preset": p["id"], "caption_style": "clean"})
+    presets.delete(p["id"])
+    seen = []
+    monkeypatch.setattr(autopilot.finder, "scan", lambda *a, **k: {"videos": [
+        {"id": "vid00000009", "title": "t", "duration": 600, "score": 80, "licence": "creativeCommon", "channel": "c"}]})
+    monkeypatch.setattr(autopilot, "_eligible", lambda r, p: True)
+    monkeypatch.setattr(autopilot, "notify", lambda *a, **k: None, raising=False)
+    autopilot.run_profile(prof["id"], lambda url, overrides, **k: seen.append(overrides) or {"clips": [], "title": "t"})
+    assert seen[0]["caption_style"] == "clean" and "preset" not in seen[0]

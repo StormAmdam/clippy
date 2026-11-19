@@ -94,3 +94,20 @@ def test_the_pc_controls_it_and_shows_the_code(shorts):
         assert 'xmlns="http://www.w3.org/2000/svg"' in svg.text                  # or an <img> can't show it
     assert here.post("/api/phone", json={"on": False}).json()["on"] is False
     assert here.get("/api/phone/qr.svg").status_code == 409
+
+
+def test_a_server_that_couldnt_start_isnt_reported_as_on(shorts, monkeypatch):
+    import uvicorn
+
+    class Dead:
+        started, should_exit = False, False
+
+        def __init__(self, config):
+            pass
+
+        def run(self):
+            pass                                                  # the port was taken: it ends at once
+    monkeypatch.setattr(uvicorn, "Server", Dead)
+    with pytest.raises(phone.PhoneError, match="couldn't open"):
+        phone.start()
+    assert phone.status()["on"] is False

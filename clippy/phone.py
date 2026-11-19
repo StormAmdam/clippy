@@ -98,9 +98,13 @@ def start() -> dict:
             th.start()
             _state.update(server=srv, thread=th)
             for _ in range(50):
-                if srv.started:
+                if srv.started or not th.is_alive():
                     break
                 time.sleep(0.1)
+            if not srv.started:                         # the port was taken after all, or it couldn't start
+                srv.should_exit = True
+                _state.update(server=None, thread=None, port=None, token=None)
+                raise PhoneError("Phone review couldn't open (another program may be using its port). Try again.")
     return status()
 
 

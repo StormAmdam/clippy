@@ -20,8 +20,11 @@ from . import config, uploads
 
 STABLE = 60.0              # seconds a recording's size and time must stay the same before it counts as finished
 POLL = 20.0                # seconds between looks at the folder
+RETRY = 300.0              # a recording that couldn't be brought in is tried again after this long…
+TRIES = 5                  # …this many times (disk full, tools missing), then it's left alone
 PARTIAL = (".part", ".tmp", ".crdownload", ".download", ".partial", ".!ut")
 _pending: dict[str, tuple[int, float, float]] = {}       # path -> (size, mtime, unchanged since)
+_wait_until: dict[str, float] = {}                        # path -> don't try before (after a failure)
 
 
 class WatchError(ValueError):
@@ -89,8 +92,9 @@ def _import(f: Path) -> dict:
         part.unlink(missing_ok=True)                      # the same recording again: the earlier copy is used
 
 
-def scan_once(queue_job, now: float | None = None, log=print) -> list[str]:
-    """One look at the folder. queue_job(path, title, preset) starts making shorts. Returns the files queued."""
+def scan_once(queue_job, now: float | None = None, log=print, job_state=None) -> list[str]:
+    """One look at the folder. queue_job(path, title, preset) starts making shorts. Returns the files queued.
+    job_state(job id) → its state: a job Clippy was closed in the middle of is queued again."""
     cfg = config.load()
     try:
         d = check_folder(cfg.watch_folder)
@@ -112,13 +116,19 @@ def scan_once(queue_job, now: float | None = None, log=print) -> list[str]:
         _write_state(state)
         return []
     queued = []
+    if job_state is not None:                          # closed while making shorts from a recording: again
+        for v in seen.values():
+            if v.get("job") and v.get("path") and job_state(v["job"]) == "interrupted" and Path(v["path"]).exists():
+                v["job"] = queue_job(v["path"], v.get("title") or Path(v["path"]).stem, cfg.watch_preset)
+                _write_state(state)
+                log(f"  watch folder: {v.get('file')} was interrupted when Clippy closed; making its shorts again")
     for f in files:
         try:
             st = f.stat()
         except OSError:
             continue
         key = _key(f, st)
-        if key in seen or st.st_size == 0:
+        if key in seen or st.st_size == 0 or now < _wait_until.get(str(f), 0):
             continue
         sig = (st.st_size, st.st_mtime)
         prev = _pending.get(str(f))
@@ -130,14 +140,25 @@ def scan_once(queue_job, now: float | None = None, log=print) -> list[str]:
         try:
             with open(f, "rb"):                           # a recorder still holding it (Windows) can't be read yet
                 pass
+        except OSError:
+            continue                                      # not finished after all: look again next time
+        try:
             item = _import(f)
         except (OSError, uploads.UploadError) as e:
-            log(f"  watch folder: couldn't bring in {f.name}: {e}")
-            seen[key] = {"file": f.name, "at": now, "error": str(e)[:200]}
+            fails = state.setdefault("failed", {})
+            fails[key] = fails.get(key, 0) + 1
+            if fails[key] >= TRIES:                       # tried enough: leave it, and say why in Settings
+                seen[key] = {"file": f.name, "at": now, "error": str(e)[:200]}
+                log(f"  watch folder: gave up on {f.name}: {e}")
+            else:
+                _wait_until[str(f)] = now + RETRY
+                log(f"  watch folder: couldn't bring in {f.name} ({e}); trying again in a few minutes")
             _write_state(state)
             continue
         jid = queue_job(item["path"], item["title"], cfg.watch_preset)
-        seen[key] = {"file": f.name, "at": now, "video": item["id"], "job": jid}
+        state.get("failed", {}).pop(key, None)
+        seen[key] = {"file": f.name, "at": now, "video": item["id"], "job": jid, "path": item["path"],
+                     "title": item["title"]}
         _pending.pop(str(f), None)
         _write_state(state)
         queued.append(f.name)

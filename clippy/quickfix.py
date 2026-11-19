@@ -111,8 +111,8 @@ def load(file: str) -> dict:
 
 
 def _source(workdir: Path) -> Path | None:
-    from .download import SOURCE_EXT
-    return next((f for f in sorted(workdir.glob("source.*")) if f.suffix in SOURCE_EXT and f.is_file()), None)
+    from .uploads import VIDEO_EXT                       # every kind an upload or a watched recording can be
+    return next((f for f in sorted(workdir.glob("source.*")) if f.suffix.lower() in VIDEO_EXT and f.is_file()), None)
 
 
 def info(file: str) -> dict:
@@ -122,7 +122,7 @@ def info(file: str) -> dict:
     s, e = float(pick["start"]), float(pick["end"])
     vinfo = _read(d["workdir"] / "info.json", {}) or {}
     src = _source(d["workdir"])
-    kind = "countdown" if d["countdown"] or pick.get("segments") else "visual" if d["visual"] else "speech"
+    kind = "countdown" if pick.get("segments") else "visual" if d["visual"] else "speech"
     lo, hi = s - CONTEXT, e + CONTEXT
     if kind == "countdown":
         lo = min(m["start"] for m in pick["segments"]) - 2
@@ -201,7 +201,7 @@ def apply(file: str, start: float | None = None, end: float | None = None, words
     vinfo_saved = _read(d["workdir"] / "info.json", {}) or {}
     changed = []
 
-    if (start is not None or end is not None) and not (d["countdown"] or pick.get("segments")):
+    if (start is not None or end is not None) and not pick.get("segments"):
         s = float(pick["start"] if start is None else start)
         e = float(pick["end"] if end is None else end)
         length = float(vinfo_saved.get("duration") or 0) or None
@@ -355,7 +355,9 @@ def make_clip(video: str, i0: int, i1: int, title: str = "", overrides: dict | N
     vinfo = _read(d / "info.json", {}) or {}
     result = _read(d / "result.json", {}) or {}
     from . import presets
-    made_with = {**presets.expand(overrides), "clips_dir": MINE}       # a saved style, if one was chosen
+    expanded = presets.expand(overrides)                                # a saved style, if one was chosen
+    look_now = config.load(expanded)
+    made_with = {**{k: getattr(look_now, k) for k in presets.KEYS}, **expanded, "clips_dir": MINE}
     src, base = _ensure_source(d, vinfo, result, made_with, progress, log, "a clip can't be made from it")
     out_dir = d / MINE
     out_dir.mkdir(exist_ok=True)

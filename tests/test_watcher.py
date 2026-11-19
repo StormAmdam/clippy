@@ -109,3 +109,36 @@ def test_status_lists_what_it_made(folder):
     watcher.scan_once(q, now=200)
     s = watcher.status()
     assert s["watching"] and [r["file"] for r in s["recent"]] == ["show.mp4"]
+
+
+def test_a_recording_that_cant_be_brought_in_is_tried_again_then_left(folder, monkeypatch):
+    rec, queued, q = folder
+    _record(rec, "big.mp4", b"x" * 100, 1000)
+    calls = []
+
+    def full(f):
+        calls.append(f.name)
+        raise uploads.UploadError("Not enough free disk space")
+    monkeypatch.setattr(watcher, "_import", full)
+    watcher.scan_once(q, now=100)
+    watcher.scan_once(q, now=200)                                   # tried: failed
+    assert calls == ["big.mp4"] and queued == []
+    watcher.scan_once(q, now=300)                                   # waits a few minutes before trying again
+    assert calls == ["big.mp4"]
+    for t in range(600, 600 + 400 * watcher.TRIES, 400):
+        watcher.scan_once(q, now=t)
+    assert len(calls) == watcher.TRIES                              # then it gives up, and says why
+    assert any(v.get("error") for v in json.loads(watcher._state_file().read_text())["seen"].values())
+
+
+def test_shorts_interrupted_by_closing_clippy_are_made_again(folder):
+    rec, queued, q = folder
+    _record(rec, "show.mp4", b"x" * 100, 1000)
+    watcher.scan_once(q, now=100)
+    watcher.scan_once(q, now=200)
+    assert len(queued) == 1
+    states = {"job1": "interrupted"}
+    watcher.scan_once(q, now=300, job_state=lambda j: states.get(j))
+    assert len(queued) == 2 and queued[1][0] == queued[0][0]        # the same recording, queued again
+    watcher.scan_once(q, now=400, job_state=lambda j: states.get(j))
+    assert len(queued) == 2                                         # once

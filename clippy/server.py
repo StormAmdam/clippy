@@ -827,7 +827,8 @@ def _watcher():
         return _new_job(url=path, title=title, options={"preset": preset} if preset else {})["id"]
     while True:
         try:
-            watcher.scan_once(queue_job, log=lambda m: print(m, flush=True))
+            watcher.scan_once(queue_job, log=lambda m: print(m, flush=True),
+                              job_state=lambda jid: (STORE.get(jid) or {}).get("state"))
         except Exception:                                  # a bad moment (disk unplugged): try again next time
             traceback.print_exc()
         time.sleep(watcher.POLL)

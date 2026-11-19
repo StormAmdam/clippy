@@ -109,6 +109,8 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
     p = pr.stage("pick")
     countdown = cfg.format == "top"
     picks_file = workdir / ("picks-top.json" if countdown else "picks.json")
+    if cfg.focus:                                       # picks for one instruction don't replace the usual ones
+        picks_file = picks_file.with_name(picks_file.stem + "-focus.json")
     needs_ai = not visual and not (reuse and picks_file.exists())   # picking uses the AI anyway
     eyes = vision.eyes_for(cfg, log, start=needs_ai)    # None unless the AI can see (and it's allowed)
     if reuse and picks_file.exists():
@@ -133,7 +135,9 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
 
     rcfg = render_settings(cfg, visual, countdown)
     words = [] if visual else tr["words"]
-    made_with = {k: v for k, v in (overrides or {}).items() if k != "reuse_picks"}
+    from . import presets
+    made_with = {**{k: getattr(cfg, k) for k in presets.KEYS},     # the whole look, so Quick Fix renders it the same
+                 **{k: v for k, v in (overrides or {}).items() if k != "reuse_picks"}}
 
     p = pr.stage("render")
     out_dir = workdir / re.sub(r"[^\w-]", "", str((overrides or {}).get("clips_dir") or
