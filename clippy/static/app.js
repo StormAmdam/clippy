@@ -48,6 +48,7 @@ const ICONS = {
   type: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/>',
   smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>',
   columns: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   zoom: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/>',
   mute: '<path d="M11 5 6 9H2v6h4l5 4V5Z"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/>',
   progress: '<path d="M3 12h18"/><path d="M3 6h12"/><path d="M3 18h7"/>',
@@ -258,8 +259,9 @@ function clipCard(c) {
   return `<article class="clip">
     <video src="/media/${encodeURI(c.file)}" ${c.thumb ? `poster="/media/${encodeURI(c.thumb)}"` : ""} controls preload="none" playsinline width="232" height="412"></video>
     <div class="b">
-      <div class="row small muted"><span class="score ${scoreCls(c.score)}" title="AI score">${c.score ?? "–"}</span><span class="num">${Math.round(c.duration || 0)}&nbsp;s</span>
-        ${c.teaser ? `<span class="tag">${icon("zap")} Teaser</span>` : ""}</div>
+      <div class="row small muted"><span class="score ${scoreCls(c.score)}" title="${esc(c.why ? `AI score: ${c.why}` : "AI score")}">${c.score ?? "–"}</span><span class="num">${Math.round(c.duration || 0)}&nbsp;s</span>
+        ${c.teaser ? `<span class="tag">${icon("zap")} Teaser</span>` : ""}
+        ${c.look != null ? `<span class="tag" title="${esc(`How it looks on a phone, as the AI saw it${c.look_why ? `: ${c.look_why}` : ""}`)}">${icon("eye")} Looks ${c.look}/10</span>` : ""}</div>
       <h3>${esc(c.title)}</h3>
       ${post ? `<div class="cap">${esc(post)}</div>` : ""}
       <div class="acts"><a class="btn sm" href="/media/${encodeURI(c.file)}" download>${icon("download")} Download</a>
