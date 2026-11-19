@@ -548,7 +548,7 @@ details.more > div { padding: 0 14px 14px; }
 .space > div { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; background: var(--well); border: 2px solid var(--line); border-radius: var(--frame); }
 .space b { font-family: var(--display); font-size: 32px; font-weight: 700; }
 @media (max-width: 640px) { .setup-banner { flex-direction: column; align-items: stretch; } .space { grid-template-columns: 1fr; }
-  .rowi.model { flex-wrap: wrap; } .rowi .acts { width: 100%; justify-content: flex-end; } }
+  .rowi.model, .rowi:has(> .acts) { flex-wrap: wrap; } .rowi .acts { width: 100%; justify-content: flex-end; } }
 #aiAdd { flex-wrap: nowrap; } #aiAdd .input { flex: 1; min-width: 0; }
 .aihead { align-items: flex-start; } .aihead h2 { margin: 0; }
 

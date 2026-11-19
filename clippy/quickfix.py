@@ -256,7 +256,7 @@ def apply(file: str, start: float | None = None, end: float | None = None, words
     from . import vision
     stats = render_clip(rcfg, src, vinfo, pick, [] if d["visual"] else words_all, env, new,
                         progress=lambda p, m="": progress(base + (1 - base) * p, m), log=log,
-                        eyes=vision.eyes_for(cfg, log))
+                        eyes=vision.eyes_for(cfg, log, start=False))
     edits = {**d["edits"], "words": fixed}
     config.write_atomic(sidecar(new), json.dumps({"pick": pick, "overrides": d["overrides"], "visual": d["visual"],
                                                   "countdown": d["countdown"], "edits": edits}, ensure_ascii=False))
@@ -370,7 +370,7 @@ def make_clip(video: str, i0: int, i1: int, title: str = "", overrides: dict | N
     from . import vision
     stats = render_clip(rcfg, src, video_stream_info(src), pick, words, np.load(env_file) if env_file.exists() else None,
                         out, progress=lambda p, m="": progress(base + (1 - base) * p, m), log=log,
-                        eyes=vision.eyes_for(cfg, log))
+                        eyes=vision.eyes_for(cfg, log, start=False))
     config.write_atomic(sidecar(out), json.dumps({"pick": pick, "overrides": made_with, "visual": False,
                                                   "countdown": False}, ensure_ascii=False))
     root = _root().resolve()

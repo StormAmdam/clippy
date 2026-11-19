@@ -5,6 +5,7 @@ so every element can bounce, pop, tilt and slide.
 """
 from __future__ import annotations
 
+import bisect
 import math
 import random
 import re
@@ -217,7 +218,7 @@ class Overlay:
             if nxt - g[-1].e < 0.4:
                 end = nxt
             self.chunks.append(Chunk(g, g[0].s, end, layout_at(g[0].s)["caption_y"]))
-        self._ci = 0
+        self._starts = [c.s for c in self.chunks]          # chunks in order: found by time, from any thread
 
         self.emoji_font = None
         if cfg.emojis:
@@ -471,15 +472,10 @@ class Overlay:
 
     # ── per frame
     def _chunk_at(self, t: float) -> Chunk | None:
-        cs = self.chunks
-        i = self._ci
-        if i < len(cs) and cs[i].s > t:
-            i = 0
-        while i < len(cs) and cs[i].e <= t:
-            i += 1
-        self._ci = i
-        if i < len(cs) and cs[i].s <= t < cs[i].e:
-            return cs[i]
+        """The caption chunk on screen at time t. No cursor: frames are drawn on several threads, out of order."""
+        i = bisect.bisect_right(self._starts, t) - 1
+        if i >= 0 and self.chunks[i].s <= t < self.chunks[i].e:
+            return self.chunks[i]
         return None
 
     def draw(self, frame: np.ndarray, t: float) -> None:

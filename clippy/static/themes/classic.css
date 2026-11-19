@@ -43,7 +43,7 @@ svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
 .skip { position: absolute; left: 12px; top: -60px; z-index: 100; background: var(--yellow); color: var(--yellow-ink); padding: 10px 14px;
         border-radius: var(--ctl); font-weight: 700; text-decoration: none; }
 .skip:focus { top: 12px; }
-.mob-links { display: none; gap: 8px; margin: -12px 0 20px; }
+.mob-links { display: none; gap: 8px; margin: -12px 0 20px; flex-wrap: wrap; }
 
 /* ───────────── shell ───────────── */
 .app { display: grid; grid-template-columns: var(--side) 1fr; min-height: 100vh; }
@@ -488,7 +488,7 @@ details.more > div { padding: 0 14px 14px; }
 .space > div { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; background: var(--suite); border: 1px solid var(--line); border-radius: var(--ctl); }
 .space b { font-family: var(--display); font-size: 24px; font-weight: 600; }
 @media (max-width: 640px) { .setup-banner { flex-direction: column; align-items: stretch; } .space { grid-template-columns: 1fr; }
-  .rowi.model { flex-wrap: wrap; } .rowi .acts { width: 100%; justify-content: flex-end; } }
+  .rowi.model, .rowi:has(> .acts) { flex-wrap: wrap; } .rowi .acts { width: 100%; justify-content: flex-end; } }
 #aiAdd { flex-wrap: nowrap; } #aiAdd .input { flex: 1; min-width: 0; }
 .aihead { align-items: flex-start; } .aihead h2 { margin-top: 0; }
 

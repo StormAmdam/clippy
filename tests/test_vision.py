@@ -174,9 +174,18 @@ def test_a_small_steady_face_in_a_corner_is_a_webcam():
         p = np.array(pts)
         return {"pts": pts, "cx": float(np.median(p[:, 1])), "cy": float(np.median(p[:, 2])), "fh": fh}
     cam = track(1700, 150, 130)
-    assert reframe.webcam_track([cam], 10, W, H) is cam
-    assert reframe.webcam_track([track(960, 400, 300)], 10, W, H) is None      # a person in the middle
-    assert reframe.webcam_track([track(1700, 150, 130, jitter=200)], 10, W, H) is None   # moving around
+    x0, y0, x1, y1 = reframe.webcam_box(cam, W, H)
+    game = np.full((54, 96), 10.0)                                   # movement per cell: a game all around…
+    game[int(y0 / H * 54): int(y1 / H * 54) + 1, int(x0 / W * 96): int(x1 / W * 96) + 1] = 1.5   # …a calm webcam box
+    moving_scene = np.full((54, 96), 10.0)                           # footage where the face moves with everything
+    still_room = np.full((54, 96), 2.5)                              # a podcast: nothing much moves
+    assert reframe.webcam_track([cam], 10, W, H, game) is cam
+    assert reframe.webcam_track([cam, track(960, 450, 330)], 10, W, H, game) is cam   # a cutscene face: still a stream
+    assert reframe.webcam_track([cam], 10, W, H, moving_scene) is None  # not a separate box: not a webcam
+    assert reframe.webcam_track([cam], 10, W, H, still_room) is None    # a still room: a person, not a stream
+    assert reframe.webcam_track([track(960, 400, 300)], 10, W, H, game) is None    # a person in the middle
+    assert reframe.webcam_track([track(1700, 150, 130, jitter=200)], 10, W, H, game) is None   # moving around
+    assert reframe.webcam_track([cam], 10, W, H, None) is None                     # no movement measured: no guess
     x0, y0, x1, y1 = reframe.webcam_box(cam, W, H)
     assert x0 < 1700 < x1 and y0 < 150 < y1 and x1 <= W and y0 >= 0
 
@@ -188,7 +197,7 @@ def test_analyze_asks_the_ai_once_per_clip_and_follows_its_subject(tmp_path):
     asked = []
 
     class Eyes:
-        def shots(self, frames):
+        def shots(self, frames, keys=None, cache=None):
             asked.append(len(frames))
             h, w = frames[0].shape[:2]
             return [{"kind": "scene", "subject": (0.70 * w, 0.2 * h, 0.85 * w, 0.95 * h), "cam": None, "wide": False,
@@ -240,9 +249,10 @@ def test_the_built_in_ai_loads_its_vision_file(tmp_path, monkeypatch, tmp_output
     monkeypatch.setattr(engine.subprocess, "Popen", lambda args, **k: calls.append(args) or Proc())
     with pytest.raises(RuntimeError):
         engine.Engine().start(config.Settings(), model)
-    first, retry = calls
+    first, no_eyes, plain = calls
     assert first[-6:] == ["--mmproj", "Qwen3.5-4B-Q4_K_M.mmproj.gguf", *engine.KV8]   # its eyes, 8-bit memory
-    assert retry[-2:] == ["--mmproj", "Qwen3.5-4B-Q4_K_M.mmproj.gguf"]              # an engine that can't: without
+    assert "--mmproj" not in no_eyes and no_eyes[-4:] == engine.KV8                # a vision file it can't load
+    assert "--mmproj" not in plain and "q8_0" not in plain                         # then the usual memory too
     calls.clear()
     with pytest.raises(RuntimeError):
         engine.Engine().start(config.Settings(vision="off"), model)
@@ -286,3 +296,41 @@ def test_a_clip_and_its_teaser_are_asked_about_in_one_request(tmp_path):
     parts = render.plan(config.Settings(teaser=True), src, video_stream_info(src), clip, words, None, eyes=Eyes())
     assert [p.kind for p in parts] == ["teaser", "main"] and len(calls) == 1 and calls[0] >= 2
     assert all(s.layout == "crop" for p in parts for s in p.shots)            # both parts framed on the subject
+
+
+def test_captions_are_found_by_time_in_any_order():
+    from clippy.overlay import Overlay
+    from tests.conftest import make_words
+    words = make_words("one two three four five six seven eight nine ten eleven twelve", start=0.2, step=0.5)
+    ov = Overlay(config.Settings(), words, 7.0, "", [], [], lambda t: {"caption_y": 1300, "title_y": 220})
+    times = [round(0.1 * i, 2) for i in range(70)]
+    in_order = [ov._chunk_at(t) for t in times]
+    shuffled = list(reversed(times))                             # frames drawn by several threads, out of order
+    assert [ov._chunk_at(t) for t in shuffled] == list(reversed(in_order))
+    assert ov._chunk_at(-1) is None and in_order[10] is not None
+
+
+def test_a_failed_rating_counts_as_an_average_look(monkeypatch):
+    clips = [{"start": 0, "end": 30, "score": 90, "title": "A"}, {"start": 40, "end": 70, "score": 88, "title": "B"},
+             {"start": 80, "end": 110, "score": 0, "title": "C"}]
+    monkeypatch.setattr(vision, "frames_at", lambda src, times, width=512: [np.zeros((4, 4, 3), np.uint8)])
+
+    class Eyes:
+        def rate(self, frames, about=""):
+            return {"A": (8, "good"), "B": None, "C": (10, "great")}[about]
+    kept = vision.rerank(Eyes(), clips, "v.mp4", 3, log=lambda m: None)
+    by = {c["title"]: c["score"] for c in kept}
+    assert by == {"A": 88, "B": 78, "C": 25}                      # B: 0.75*88 + 2.5*5; C keeps its 0, not 50
+
+
+def test_vision_never_starts_a_stopped_ai_when_it_isnt_needed(monkeypatch):
+    started = []
+    monkeypatch.setattr(llm, "resolve", lambda cfg, *a, **k: llm.Server("", "Built-in AI", ["m"]))
+    monkeypatch.setattr(llm.LLM, "wait_ready", lambda self, **k: started.append(1))
+    assert vision.eyes_for(config.Settings(vision="auto"), start=False) is None and started == []
+
+    def nothing(cfg, *a, **k):
+        raise RuntimeError("no AI running")
+    monkeypatch.setattr(llm, "resolve", nothing)
+    said = []
+    assert vision.eyes_for(config.Settings(vision="auto"), log=said.append, start=False) is None and said == []

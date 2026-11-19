@@ -223,6 +223,7 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
     motion: dict[int, np.ndarray] = {}     # per sampled frame: how much moved per column (what's happening)
     thumbs: dict[int, np.ndarray] = {}     # about one frame a second, for the AI to look at
     every = max(1, round(fps))
+    portrait = W / H <= 9 / 16 + 0.02                # already vertical: nothing to ask about framing
     prev_hsv = prev_hist = prev_g = None
     n = 0
     for i, frame in enumerate(FrameStream(frame_reader(src, start, nframes, fps_str or f"{fps:.6f}", (aw, ah)), aw, ah)):
@@ -235,7 +236,7 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
             scores.append(float(np.mean(cv2.absdiff(hsv, prev_hsv))))
             corrs.append(float(cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)))
         prev_hsv, prev_hist = hsv, hist
-        if eyes is not None and i % every == every // 2:
+        if eyes is not None and not portrait and i % every == every // 2:
             thumbs[i] = frame.copy()
         if i % step == 0:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -243,7 +244,7 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
             energies[i] = cv2.resize(np.abs(gx).mean(axis=0, keepdims=True), (96, 1), interpolation=cv2.INTER_AREA)[0]
             g = cv2.resize(gray, (96, 54), interpolation=cv2.INTER_AREA).astype(np.float32)
             if prev_g is not None:
-                motion[i] = np.abs(g - prev_g).mean(axis=0)
+                motion[i] = np.abs(g - prev_g)          # per cell (54 x 96): what moved, and where
             prev_g = g
             _, faces = det.detect(frame)
             rows = []
@@ -266,6 +267,8 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
     shots: list[Shot] = []
     cols: dict[int, np.ndarray] = {}       # per shot: where the detail and movement are, per column
     webcams: dict[int, dict] = {}          # per shot: a face that looks like a streamer's webcam
+    motions: dict[int, np.ndarray] = {}    # per shot: mean movement per cell (54 x 96)
+    shot_tracks: dict[int, list] = {}      # per shot: its faces
     for a, b in zip(cuts[:-1], cuts[1:]):
         if b <= a:
             continue
@@ -278,8 +281,10 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
         if shot_energy:
             col = np.mean(shot_energy, axis=0)
             moved = [motion[fi] for fi, _ in sm if fi in motion]
+            if moved:
+                motions[len(shots) - 1] = np.mean(moved, axis=0)
             if moved and float(np.mean(moved)) > 1.0:          # moving things count more than still texture
-                mv = np.mean(moved, axis=0)
+                mv = np.mean(moved, axis=0).mean(axis=0)       # per column
                 col = col / max(float(col.max()), 1e-6) + 1.5 * mv / max(float(mv.max()), 1e-6)
             cols[len(shots) - 1] = col
             if no_captions:  # nothing goes under the picture → bigger square window, centred
@@ -301,7 +306,8 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
         if not tracks:
             continue  # no reliable face → full frame over blurred background
         tracks.sort(key=lambda t: -t["weight"])
-        cam = webcam_track(tracks, len(sm), W, H)
+        shot_tracks[len(shots) - 1] = tracks
+        cam = webcam_track(tracks, len(sm), W, H, motions.get(len(shots) - 1))
         if cam is not None:                    # a streamer's webcam: it goes on top, the game below (see below)
             webcams[len(shots) - 1] = cam
             shot.fit_crop = None
@@ -317,6 +323,15 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
                 continue
         shot.fit_crop = None
         _plan_crop(shot, main, a, b, fps, W, crop_w_full)
+    if webcams:                                # a webcam stays put across cuts: the same face, same place, same size
+        ref = list(webcams.values())
+        for k, tracks in shot_tracks.items():
+            if k in webcams:
+                continue
+            same = next((t for t in tracks for r in ref if abs(t["cx"] - r["cx"]) < 0.04 * W
+                         and abs(t["cy"] - r["cy"]) < 0.06 * H and 0.7 < t["fh"] / max(r["fh"], 1) < 1.4), None)
+            if same is not None:
+                webcams[k] = same
     pending = {"shots": shots, "thumbs": thumbs, "fps": fps, "W": W, "H": H, "src": src, "start": start,
                "cols": cols, "webcams": webcams, "no_captions": no_captions,
                "look": eyes is not None and bool(thumbs) and not portrait_src}
@@ -347,10 +362,7 @@ def finish_looks(eyes, pending: list[dict], log=lambda m: None) -> None:
         frames = [pending[i]["thumbs"][fi] for i, _, fi in asks]
         keys = [f"{pending[i]['start'] + fi / pending[i]['fps']:.2f}" for i, _, fi in asks]
         src = pending[asks[0][0]]["src"]
-        try:
-            got = eyes.shots(frames, keys=keys, cache=Path(src).with_name("vision.json") if src else None)
-        except TypeError:                      # eyes without a memory (tests)
-            got = eyes.shots(frames)
+        got = eyes.shots(frames, keys=keys, cache=Path(src).with_name("vision.json") if src else None)
         found: dict[tuple[int, int], list] = {}
         for (i, k, _), v in zip(asks, got):
             if v is None:
@@ -515,8 +527,16 @@ def apply_view(shot: Shot, view: dict, W: int, H: int, fps: float, col_energy=No
     return ""
 
 
-def webcam_track(tracks: list[dict], n_samples: int, W: int, H: int) -> dict | None:
-    """A face that sits small and still in a corner the whole shot is a streamer's webcam, not someone to follow."""
+STREAM_MOTION = 6.0       # mean movement around a webcam: gameplay measured 7.4-11, people talking 2-5
+CAM_STILLNESS = 0.5       # a webcam box moves at most half as much as that (measured 0.15-0.21; a face in moving
+                          # footage that isn't a webcam: 1.18)
+
+
+def webcam_track(tracks: list[dict], n_samples: int, W: int, H: int, motion=None) -> dict | None:
+    """A face small and still in a corner the whole shot, in a box that's calm while the picture around it keeps
+    moving (a game), is a streamer's webcam, not someone to follow. motion: mean movement per cell (rows x columns)."""
+    if motion is None:
+        return None
     for t in tracks:
         p = np.array(t["pts"])
         if len(p) < max(3, 0.6 * n_samples):
@@ -525,7 +545,16 @@ def webcam_track(tracks: list[dict], n_samples: int, W: int, H: int) -> dict | N
         corner_y = t["cy"] < 0.33 * H or t["cy"] > 0.67 * H
         steady = float(np.std(p[:, 1])) < 0.025 * W and float(np.std(p[:, 2])) < 0.03 * H
         if corner_x and corner_y and t["fh"] < 0.2 * H and steady:
-            return t
+            m = np.asarray(motion, dtype=np.float64)
+            rows, cols = m.shape
+            x0, y0, x1, y1 = webcam_box(t, W, H)
+            inside = np.zeros(m.shape, bool)
+            inside[int(y0 / H * rows): int(np.ceil(y1 / H * rows)), int(x0 / W * cols): int(np.ceil(x1 / W * cols))] = True
+            if inside.all() or not inside.any():
+                continue
+            around, box = float(m[~inside].mean()), float(m[inside].mean())
+            if around >= STREAM_MOTION and box <= CAM_STILLNESS * around:
+                return t
     return None
 
 

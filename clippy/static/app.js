@@ -1326,7 +1326,8 @@ async function openQuote(video, {after = () => {}} = {}) {
     if (v && v.paused) v.currentTime = d.lines[n].s;                       // the preview shows that moment
     const row = $(`.ql[data-n="${n}"]`, m), box = $("#qqLines", m);
     if (searching && row && box) {
-      box.scrollTop = Math.max(0, row.offsetTop - box.offsetTop - 60);
+      if (box.scrollHeight > box.clientHeight + 4) box.scrollTop = Math.max(0, row.offsetTop - box.offsetTop - 60);
+      else row.scrollIntoView({block: "center"});                              // phones: the whole window scrolls
       $("#qqCount", m).textContent = `Showing every line again. Pick the ${other} line.`;
     }
   };

@@ -162,19 +162,28 @@ def _write_cache(path, shots: dict) -> None:
         pass
 
 
-def eyes_for(cfg, log=print) -> Eyes | None:
-    """Eyes when the setting allows it and the AI can see; None otherwise (and nothing changes)."""
+def eyes_for(cfg, log=print, start: bool = True) -> Eyes | None:
+    """Eyes when the setting allows it and the AI can see; None otherwise (and nothing changes).
+    start=False: only an AI that's already running (Quick Fix, no-talking videos, reused picks don't need the AI
+    otherwise, so nothing is loaded or downloaded just to look)."""
     if str(getattr(cfg, "vision", "auto")).lower() == "off":
         return None
     try:
-        from .llm import LLM
+        from .llm import LLM, resolve
         llm = LLM(cfg, log=log)
-        llm.wait_ready(timeout=60)
+        if start:
+            llm.wait_ready(timeout=60)
+        else:
+            s = resolve(cfg)
+            if not s.base:                               # the built-in AI isn't running
+                return None
+            llm._use(s)
         if llm.can_see():
             log(f"  the AI can see ({llm.model}): it checks the framing and how each clip looks")
             return Eyes(llm, log)
     except Exception as e:
-        log(f"  couldn't ask whether the AI can see ({str(e)[:120]})")
+        if start:
+            log(f"  couldn't ask whether the AI can see ({str(e)[:120]})")
     return None
 
 
@@ -199,13 +208,13 @@ def rerank(eyes: Eyes | None, clips: list[dict], src, want: int, log=print) -> l
         s, e = float(c["start"]), float(c["end"])
         frames = frames_at(src, [s + (e - s) * f for f in (0.12, 0.38, 0.62, 0.88)])
         got = eyes.rate(frames, c.get("title") or "") if frames else None
-        if got is None:
-            continue
-        look, why = got
-        c["look"], c["look_why"] = look, why
+        said = float(c["score"]) if c.get("score") is not None else 50.0
+        look, why = got if got is not None else (5, "")  # couldn't rate it: an average look, same scale as the rest
+        if got is not None:
+            c["look"], c["look_why"] = look, why
+            log(f"    looks {look}/10: {c.get('title') or ''} ({why})")
         c["score_said"] = c.get("score")
-        c["score"] = int(round(0.75 * float(c.get("score") or 50) + 2.5 * look))
-        log(f"    looks {look}/10: {c.get('title') or ''} ({why})")
+        c["score"] = int(round(0.75 * said + 2.5 * look))
     kept = sorted(clips, key=lambda c: -(c.get("score") or 0))[:want]
     dropped = [c for c in clips if c not in kept]
     if dropped:

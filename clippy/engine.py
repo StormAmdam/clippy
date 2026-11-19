@@ -121,7 +121,12 @@ def install_model(mid: str = "", url: str = "") -> components.Task:
         if m_url := (m.get("mmproj_url") if not url else ""):
             if str(config.load().vision).lower() != "off":   # its eyes: framing and rating clips by looking
                 t.label, t.done, t.total = f"Vision for {label}", 0, 0
-                components.fetch(m_url, vision_file(components.LLM_DIR / name), t, f"Vision for {label}")
+                try:
+                    components.fetch(m_url, vision_file(components.LLM_DIR / name), t, f"Vision for {label}")
+                except aisetup.Cancelled:
+                    raise
+                except Exception:                        # an extra: the model works without it (Add Vision later)
+                    vision_file(components.LLM_DIR / name).unlink(missing_ok=True)
         if not components.engine_exe():                  # a model is no use without the engine that runs it
             t.label, t.done, t.total = "AI engine", 0, 0
             components.PARTS["engine"][3](t, config.load())
@@ -165,7 +170,7 @@ class Engine:
         self.proc: subprocess.Popen | None = None
         self.model: Path | None = None
         self.vision = False
-        self.kv8 = True                                  # until an engine says it can't (see start)
+        self.failed: set = set()                         # (model, "vision" | "kv8"): extras it couldn't load
         self.port = 0
         self.context = 0
         self.last_used = 0.0
@@ -182,7 +187,8 @@ class Engine:
 
     def start(self, cfg, model: Path) -> None:
         with self.lock:
-            see = vision_file(model).exists() and str(getattr(cfg, "vision", "auto")).lower() != "off"
+            see = (vision_file(model).exists() and str(getattr(cfg, "vision", "auto")).lower() != "off"
+                   and (model, "vision") not in self.failed)
             if self.running() and self.model == model and self.vision == see:
                 self.touch()
                 return
@@ -201,37 +207,29 @@ class Engine:
             except OSError:                                         # none yet, or still open somewhere
                 pass
             # the model by its name, from its own folder: Clippy's folder may have letters like ö or 测 in its path
-            args = [str(exe), "-m", model.name, "--alias", model.stem, "--host", "127.0.0.1", "--port", str(port),
+            base = [str(exe), "-m", model.name, "--alias", model.stem, "--host", "127.0.0.1", "--port", str(port),
                     "-c", str(cfg.ai_context or CONTEXT), "--parallel", "1", "--threads", str(hw["threads"]),
                     "--fit", "on", "--fit-target", "4500" if hw["vram_mb"] >= 10 * 1024 else "1024"]
-            if see:                                      # its eyes (clippy/vision.py), by name from the same folder
-                args += ["--mmproj", vision_file(model).name]
-            if self.kv8:                                 # 8-bit working memory: half the size, so more of the model
-                args += KV8                              # fits on a small graphics card (the same picks)
+            # its eyes (the vision file) and 8-bit working memory (half the size, so more fits on a small card) are
+            # extras: an engine, file or card that can't load them gets them dropped, vision first, then 8-bit
+            kv8 = (model, "kv8") not in self.failed
+            tries = [(see, kv8)] + ([(False, kv8)] if see else []) + ([(False, False)] if kv8 else [])
             # Windows: tied to Clippy (clippy/quiet.py), so it ends when Clippy does, even if Clippy crashes
             extra = {"start_new_session": True} if sys.platform != "win32" else components.hidden()
-            with open(log_file, "ab") as log:
-                self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                             cwd=model.parent, **extra)
-            self.model, self.port, self.vision = model, port, see
-            t0 = time.time()
-            while time.time() - t0 < 600:               # a big model can take a while to load from disk
-                if self.proc.poll() is not None:
-                    tail = log_file.read_bytes()[-600:].decode(errors="replace")
-                    self.proc = None
-                    if self.kv8:                         # an engine or card that can't: the usual memory, once more
-                        self.kv8 = False
-                        return self.start(cfg, model)
-                    raise RuntimeError(f"The AI engine stopped while loading {model.stem}. Last lines of its log:\n{tail}")
-                try:
-                    if httpx.get(f"http://127.0.0.1:{port}/health", timeout=2).status_code == 200:
-                        break
-                except httpx.HTTPError:
-                    pass
-                time.sleep(1)
-            else:
-                self.stop()
-                raise RuntimeError(f"The AI engine took too long to load {model.stem}.")
+            for n_try, (vis, k8) in enumerate(tries):
+                args = base + (["--mmproj", vision_file(model).name] if vis else []) + (KV8 if k8 else [])
+                with open(log_file, "ab") as log:
+                    self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                                 cwd=model.parent, **extra)
+                self.model, self.port, self.vision = model, port, vis
+                if self._loaded(model, log_file, port):
+                    break
+                tail = log_file.read_bytes()[-600:].decode(errors="replace")
+                if n_try + 1 < len(tries):
+                    nxt = tries[n_try + 1]
+                    self.failed.add((model, "vision" if vis and not nxt[0] else "kv8"))
+                    continue
+                raise RuntimeError(f"The AI engine stopped while loading {model.stem}. Last lines of its log:\n{tail}")
             try:
                 props = httpx.get(f"http://127.0.0.1:{port}/props", timeout=5).json()
                 self.context = int(props["default_generation_settings"]["n_ctx"])
@@ -242,6 +240,22 @@ class Engine:
             if not self._watch or not self._watch.is_alive():
                 self._watch = threading.Thread(target=self._idle_watch, daemon=True, name="engine-idle")
                 self._watch.start()
+
+    def _loaded(self, model: Path, log_file: Path, port: int) -> bool:
+        """Wait for the engine to answer. False when it stopped while loading (so start can try without extras)."""
+        t0 = time.time()
+        while time.time() - t0 < 600:                   # a big model can take a while to load from disk
+            if self.proc.poll() is not None:
+                self.proc = None
+                return False
+            try:
+                if httpx.get(f"http://127.0.0.1:{port}/health", timeout=2).status_code == 200:
+                    return True
+            except httpx.HTTPError:
+                pass
+            time.sleep(1)
+        self.stop()
+        raise RuntimeError(f"The AI engine took too long to load {model.stem}.")
 
     def stop(self) -> None:
         with self.lock:

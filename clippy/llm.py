@@ -437,8 +437,10 @@ class LLM:
                     raise RuntimeError(f"AI request failed: {e}")
                 time.sleep(3)
                 continue
-            if r.status_code in (400, 413, 422) and len(user) > 2000 and CONTEXT_ERROR.search(r.text):
+            if r.status_code in (400, 413, 422) and (len(user) > 2000 or images) and CONTEXT_ERROR.search(r.text):
                 raise ContextTooSmall(r.text[:300])
+            if images and r.status_code in (400, 413, 422):     # the pictures were refused: say so, and don't switch
+                raise RuntimeError(f"AI server error {r.status_code}: {r.text[:300]}")   # features off for later
             if r.status_code == 400 and (self._schema_ok or self._kwargs_ok):
                 # provider doesn't support json_schema or chat_template_kwargs → degrade gracefully
                 if self._kwargs_ok and "chat_template_kwargs" in b:

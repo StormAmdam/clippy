@@ -106,10 +106,11 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
         log(f"  no real talking found ({n} words, {cover:.0%} speech) → picking clips from sound, action and replays")
 
     from . import vision
-    eyes = vision.eyes_for(cfg, log)                    # None unless the AI can see (and it's allowed)
     p = pr.stage("pick")
     countdown = cfg.format == "top"
     picks_file = workdir / ("picks-top.json" if countdown else "picks.json")
+    needs_ai = not visual and not (reuse and picks_file.exists())   # picking uses the AI anyway
+    eyes = vision.eyes_for(cfg, log, start=needs_ai)    # None unless the AI can see (and it's allowed)
     if reuse and picks_file.exists():
         clips = json.loads(picks_file.read_text(encoding="utf-8"))
         visual = bool(clips) and all(c.get("mode") == "visual" for c in clips)
@@ -148,21 +149,35 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
                                    "(a video player, perhaps). Close it and try again.") from None
     results = []
     # while one clip renders, the next one is planned (faces, cuts, the AI's look at its shots): same shorts, sooner
-    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
+    from .jobs import Cancelled
     from .render import plan
     ahead = ThreadPoolExecutor(max_workers=1, thread_name_prefix="plan-next")
-    plan_of = lambda c: ahead.submit(plan, rcfg, src, vinfo, c, words, env, eyes, log)
-    nxt = plan_of(clips[0]) if clips else None
+    stop_ahead = threading.Event()
+
+    def ahead_progress(q, msg=""):                      # the look-ahead stops at its next step after a cancel
+        if stop_ahead.is_set():
+            raise Cancelled()
+    plan_of = lambda c: ahead.submit(plan, rcfg, src, vinfo, c, words, env, eyes, log, ahead_progress)
+    nxt = None
     try:
         for i, clip in enumerate(clips):
-            parts = nxt.result()
+            sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
+            parts = None                                # the first clip plans here, with progress and Cancel
+            if nxt is not None:
+                while True:
+                    try:
+                        parts = nxt.result(timeout=1)
+                        break
+                    except FutureTimeout:
+                        sub(0.0, "Finding faces & camera cuts…")    # Cancel works while it's still being planned
             nxt = plan_of(clips[i + 1]) if i + 1 < len(clips) else None
             name = f"{_slug(clip.get('title') or 'top')}.mp4" if countdown else \
                 f"{i + 1:02d}-{_slug(clip.get('title') or 'clip')}.mp4"
             out = out_dir / name
             log(f"  rendering {name}")
-            sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
             stats = render_clip(rcfg, src, vinfo, clip, words, env, out, progress=sub, log=log, eyes=eyes, parts=parts)
             config.write_atomic(sidecar(out), json.dumps({"pick": clip, "overrides": made_with, "visual": visual,
                                                           "countdown": countdown}, ensure_ascii=False))
@@ -174,6 +189,7 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
                             "thumb": str(out.with_suffix(".jpg").relative_to(config.output_root(cfg)))})
             extensions.run_hook("clip_rendered", log=log, path=out, clip=dict(results[-1]), video=dict(info))
     finally:                                            # a failed or cancelled render: the look-ahead stops
+        stop_ahead.set()
         ahead.shutdown(wait=False, cancel_futures=True)
 
     summary = {"id": info["id"], "title": info["title"], "url": info.get("webpage_url", url),
