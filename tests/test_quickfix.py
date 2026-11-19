@@ -223,3 +223,71 @@ def test_a_real_fix_renders_a_playable_short(tmp_output):
     dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                                 str(out)], capture_output=True, text=True).stdout)
     assert abs(dur - 4.0) < 0.2 and out.with_suffix(".jpg").exists()
+
+
+# ───────────────────────── a clip from the transcript ─────────────────────────
+
+def test_the_transcript_comes_as_sentences_to_search(tmp_output):
+    _project(tmp_output)
+    d = quickfix.transcript("abc123")
+    assert d["source"] == "abc123/source.mp4" and d["title"] == "Cafe story"
+    assert all({"n", "s", "e", "i0", "i1", "text"} <= set(line) for line in d["lines"])
+    assert d["lines"][0]["i0"] == 0 and d["lines"][-1]["i1"] == len(TEXT.split())
+    for bad in ("../x", "_auto", "nope", ""):
+        with pytest.raises(quickfix.FixError):
+            quickfix.transcript(bad)
+
+
+def test_a_video_without_talking_has_no_transcript_to_search(tmp_output):
+    d = _project(tmp_output)
+    (d / "transcript.json").write_text(json.dumps({"words": []}))
+    with pytest.raises(quickfix.FixError, match="no transcript"):
+        quickfix.transcript("abc123")
+
+
+def test_a_quote_becomes_a_new_short_beside_the_others(tmp_output, fake_render):
+    d = _project(tmp_output)
+    picks = (d / "picks.json").read_text()
+    r = quickfix.make_clip("abc123", 8, 20, "Jorg's Cafe")
+    [call] = fake_render
+    assert (call["clip"]["i0"], call["clip"]["i1"], call["clip"]["title"]) == (8, 20, "Jorg's Cafe")
+    assert call["clip"]["start"] == pytest.approx(4.92) and call["out"].parent.name == "clips-mine"
+    entry = r["clips"][0]
+    assert entry["file"].replace("\\", "/") == "abc123/clips-mine/01-jorgs-cafe.mp4" and entry["manual"]
+    res = json.loads((d / "result.json").read_text())
+    assert [c["file"].replace("\\", "/") for c in res["clips"]][:1] == ["abc123/clips-mine/01-jorgs-cafe.mp4"]
+    assert len(res["clips"]) == 3 and (d / "picks.json").read_text() == picks
+    again = quickfix.make_clip("abc123", 30, 12)                     # lines picked last-to-first: fine
+    assert again["clips"][0]["file"].replace("\\", "/").startswith("abc123/clips-mine/02-")
+    assert fake_render[-1]["clip"]["title"] == "cafe from nothing and it nearly"   # its first words
+    fixed = quickfix.info(entry["file"])                              # and Quick Fix works on it
+    assert fixed["start"] == pytest.approx(4.92)
+
+
+@pytest.mark.parametrize("i0,i1,msg", [(8, 9, "at least"), (0, 2, "at least"), (-1, 5, "aren't"), (0, 999, "aren't")])
+def test_impossible_quotes_are_explained(tmp_output, fake_render, i0, i1, msg):
+    _project(tmp_output)
+    with pytest.raises(quickfix.FixError, match=msg):
+        quickfix.make_clip("abc123", i0, i1)
+
+
+def test_a_quote_from_a_video_without_shorts_yet(tmp_output, fake_render):
+    d = _project(tmp_output)
+    (d / "result.json").unlink()
+    quickfix.make_clip("abc123", 0, 20)
+    res = json.loads((d / "result.json").read_text())
+    assert res["title"] == "Cafe story" and len(res["clips"]) == 1
+
+
+def test_the_server_queues_a_quote_as_a_job(tmp_output, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from clippy import server
+    _project(tmp_output)
+    made = []
+    monkeypatch.setattr(server, "_new_job", lambda **f: made.append(f) or {"id": "j2"})
+    c = TestClient(server.app, base_url="http://127.0.0.1:7860")
+    assert len(c.get("/api/transcript/abc123").json()["lines"]) > 1
+    assert c.get("/api/transcript/_auto").status_code == 400
+    r = c.post("/api/transcript/abc123/clip", json={"i0": 8, "i1": 20, "title": "Mine"})
+    assert r.json() == {"id": "j2"} and made[0]["kind"] == "manual" and made[0]["options"]["i1"] == 20

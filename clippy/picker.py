@@ -212,6 +212,12 @@ def _finalize(sents, words, a, b, cfg, lang) -> dict:
     # hard cap at max_seconds at word level (single very long sentence)
     while i1 - 1 > i0 and words[i1 - 1]["e"] - words[i0]["s"] > cfg.max_seconds + 2:
         i1 -= 1
+    return {"i0": i0, "i1": i1, **clip_span(words, i0, i1)}
+
+
+def clip_span(words, i0: int, i1: int) -> dict:
+    """Where a clip of words i0..i1 starts and ends: just before the first word and a breath after the last, without
+    cutting into the words around it. (Also how Quick Fix and transcript clips cut.)"""
     start = words[i0]["s"] - 0.12
     if i0 > 0:
         start = max(start, words[i0 - 1]["e"] + 0.02)
@@ -219,7 +225,7 @@ def _finalize(sents, words, a, b, cfg, lang) -> dict:
     if i1 < len(words):
         end = min(end, words[i1]["s"] - 0.03)
     end = max(end, words[i1 - 1]["e"] + 0.05)
-    return {"i0": i0, "i1": i1, "start": round(max(0.0, start), 3), "end": round(end, 3)}
+    return {"start": round(max(0.0, start), 3), "end": round(end, 3)}
 
 
 def _energy_flags(sents, env) -> set[int]:

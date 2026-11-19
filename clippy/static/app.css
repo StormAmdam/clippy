@@ -586,3 +586,26 @@ details.more > div { padding: 0 14px 14px; }
 #qfStatus .bar { margin-bottom: 4px; max-width: 260px; }
 @media (max-width: 720px) { .qf { grid-template-columns: 1fr; } .qf-short { width: 150px; }
   .modal .mf:has(#qfStatus) { flex-wrap: wrap; } #qfStatus { flex-basis: 100%; } }
+
+/* Find a Quote: the video beside its searchable transcript */
+.qq { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 22px; align-items: start; }
+.qq-side { position: sticky; top: 0; }
+.qq-search { position: relative; }
+.qq-search svg.i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--faint); }
+.qq-search .input { padding-left: 40px; }
+.qq-lines { max-height: 52vh; overflow-y: auto; display: grid; gap: 4px; overscroll-behavior: contain; padding-right: 4px; }
+.ql { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 6px 8px; border-radius: var(--ctl);
+  border: 2px solid transparent; }
+.ql:hover { background: var(--bay2); }
+.ql.in { background: var(--yellow-soft); }
+.ql.first { border-top-color: var(--yellow); } .ql.last { border-bottom-color: var(--yellow); }
+.ql-x { background: none; border: 0; font: inherit; color: var(--ink); text-align: left; cursor: pointer; padding: 2px 0; line-height: 1.5; font-size: 14.5px; }
+.ql-x .num { font-size: 12.5px; margin-right: 4px; }
+.ql-x mark { background: var(--yellow); color: var(--yellow-ink); border-radius: 3px; padding: 0 2px; }
+.ql-x:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; border-radius: 4px; }
+.ql-b { display: flex; gap: 4px; }
+.ql-b .btn.on { background: var(--yellow); color: var(--yellow-ink); border-color: var(--yellow); }
+.qq-sel { margin-top: 14px; padding: 12px 14px; border: 2px solid var(--line); border-radius: var(--ctl); background: var(--well, var(--bay2)); }
+#qqStatus .bar { margin-bottom: 4px; max-width: 260px; }
+@media (max-width: 720px) { .qq { grid-template-columns: 1fr; } .qq-side { position: static; } .qq-lines { max-height: none; }
+  .modal .mf:has(#qqStatus) { flex-wrap: wrap; } #qqStatus { flex-basis: 100%; } }

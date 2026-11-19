@@ -437,7 +437,7 @@ pages.make = async (el) => {
           <input type="checkbox" data-fx="${k}" ${(k === "title_seconds" ? o.title_seconds !== 0 : o[k]) ? "checked" : ""}></label>`).join("")}</div>
       </section>
     </div>
-    <div class="sec hidden" id="mResWrap"><div class="sec-head"><h2 id="mResTitle">Your clips</h2><span id="mResSub" class="break"></span></div><div class="clips" id="mRes"></div></div>`;
+    <div class="sec hidden" id="mResWrap"><div class="sec-head"><h2 id="mResTitle">Your clips</h2><span id="mResSub" class="break"></span><button type="button" class="btn sm" id="mQuote">${icon("search")} Find a Quote</button></div><div class="clips" id="mRes"></div></div>`;
 
   const save = () => store.set("make", o);
   if (!THEMES.some((t) => t.id === o.top_theme)) o.top_theme = "funny";        // its extension was removed
@@ -472,6 +472,8 @@ pages.make = async (el) => {
     $("#mResWrap").classList.remove("hidden");
     $("#mResTitle").textContent = res.clips.length === 1 && res.clips[0].format === "top" ? "Your countdown is ready" : `${res.clips.length} clips ready`;
     $("#mResSub").textContent = res.title;
+    $("#mQuote").classList.toggle("hidden", res.mode === "visual");
+    $("#mQuote").onclick = () => openQuote(res.id, {after: () => {}});
     $("#mRes").innerHTML = res.clips.map(clipCard).join("");
     bindCopy($("#mRes"));
     bindFix($("#mRes"), (r, old) => {                 // swap in the fixed short
@@ -1192,6 +1194,113 @@ async function openQuickFix(file, {after = () => {}} = {}) {
   if (box && first) box.scrollTop = Math.max(0, first.offsetTop - box.offsetTop - 34);   // open where the short starts
 }
 
+// ───────────────────────── find a quote ─────────────────────────
+// the line the AI skipped: search what's said beside the video, pick the first and last line, make it a short
+async function openQuote(video, {after = () => {}} = {}) {
+  let d;
+  try { d = await api.get(`/api/transcript/${encodeURIComponent(video)}`); } catch (e) { fail(e); return; }
+  const st = {first: null, last: null, q: "", title: "", typed: false, busy: false};
+  const canMake = !!d.source || d.redownload;
+  const m = openModal(`<div class="mh"><div class="row between"><h2>Find a Quote</h2><button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div>
+      <p class="muted small break" style="margin:4px 0 0">${esc(d.title)}. Search what's said, pick the first and last line, and Clippy makes it a short with the usual captions and framing.</p></div>
+    <div class="mb"><div class="qq">
+      <div class="qq-side">
+        ${d.source ? `<video id="qqSrc" class="qf-src" src="/media/${encodeURI(d.source)}#t=${d.lines[0]?.s || 0}" preload="metadata" playsinline controls aria-label="The video"></video>`
+          : `<div class="note ${canMake ? "" : "err"}"><div class="ic">${icon(canMake ? "info" : "alert")}</div><div><b>The downloaded video was deleted</b><p>${canMake ? "Making a clip downloads it again first." : "It was an uploaded file, so it can't come back. Upload the video again to make clips from it."}</p></div></div>`}
+        <div id="qqPick" class="qq-pick" aria-live="polite"></div>
+        <div id="qqDone"></div>
+      </div>
+      <div class="qq-main">
+        <div class="qq-search">${icon("search")}<input class="input" id="qqFind" type="search" placeholder="Search what's said" autocomplete="off" aria-label="Search the transcript"></div>
+        <p class="small faint" id="qqCount" style="margin:8px 0"></p>
+        <div class="qq-lines" id="qqLines"></div>
+      </div></div></div>
+    <div class="mf"><div class="grow small" id="qqStatus" aria-live="polite"></div><button type="button" class="btn quiet" data-close>Close</button>
+      <button type="button" class="btn primary" id="qqGo" disabled>${icon("scissors")} Make This Clip</button></div>`,
+    {label: "Find a Quote", onClose: () => { if (st.busy) toast("It keeps going. The clip shows up in the Library when it's ready.", "info"); return true; }});
+  $$("[data-close]", m).forEach((b) => b.onclick = () => closeModal());
+  const v = $("#qqSrc", m);
+  let stopAt = null;
+  const play = (a, b) => { if (!v) return; v.currentTime = Math.max(0, a); stopAt = b; v.play().catch(() => {}); };
+  if (v) v.addEventListener("timeupdate", () => { if (stopAt != null && v.currentTime >= stopAt) { v.pause(); stopAt = null; } });
+  const range = () => st.first == null || st.last == null ? null : [Math.min(st.first, st.last), Math.max(st.first, st.last)];
+  const defaultTitle = (l) => l.text.split(/\s+/).slice(0, 7).join(" ").replace(/[,.;:!?]+$/, "");
+  const draw = () => {
+    const q = st.q.trim(), ql = q.toLowerCase(), r = range();
+    const shown = d.lines.filter((l) => !ql || l.text.toLowerCase().includes(ql));
+    const rx = q ? new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi") : null;
+    $("#qqCount", m).textContent = q ? `${shown.length} line${shown.length === 1 ? "" : "s"} with “${q}”` : `${d.lines.length} lines. Tap one to play it.`;
+    $("#qqLines", m).innerHTML = shown.length ? shown.map((l) => {
+      const cls = [r && l.n >= r[0] && l.n <= r[1] ? "in" : "", l.n === st.first ? "first" : "", l.n === st.last ? "last" : ""].join(" ");
+      const txt = rx ? esc(l.text).replace(rx, (x) => `<mark>${x}</mark>`) : esc(l.text);
+      return `<div class="ql ${cls}" data-n="${l.n}"><button type="button" class="ql-x" data-seek="${l.n}"><span class="num faint">${fmtT(l.s)}</span> ${txt}</button>
+        <span class="ql-b"><button type="button" class="btn sm ${l.n === st.first ? "on" : ""}" data-first="${l.n}" aria-pressed="${l.n === st.first}">First</button><button type="button" class="btn sm ${l.n === st.last ? "on" : ""}" data-last="${l.n}" aria-pressed="${l.n === st.last}">Last</button></span></div>`;
+    }).join("") : `<p class="small muted" style="margin:8px">Nothing like that is said in this video. Try another word.</p>`;
+    $$("[data-seek]", m).forEach((b) => b.onclick = () => { const l = d.lines[+b.dataset.seek]; play(l.s, l.e + 0.3); });
+    $$("[data-first]", m).forEach((b) => b.onclick = () => { st.first = +b.dataset.first; if (st.last == null) st.last = st.first; pick(st.first, "last"); });
+    $$("[data-last]", m).forEach((b) => b.onclick = () => { st.last = +b.dataset.last; if (st.first == null) st.first = st.last; pick(st.last, "first"); });
+    summary();
+  };
+  const summary = () => {
+    const r = range();
+    if (!r) { $("#qqPick", m).innerHTML = `<p class="small muted" style="margin:12px 0 0">Pick a first line and a last line (they can be the same).</p>`; $("#qqGo", m).disabled = true; $("#qqStatus", m).textContent = ""; return; }
+    const a = d.lines[r[0]], b = d.lines[r[1]], len = b.e - a.s;
+    const bad = len < 3 ? "A short needs at least 3 seconds: pick a later last line." : len > 180 ? "A short can be at most 3 minutes: pick an earlier last line." : "";
+    if (!st.typed) st.title = defaultTitle(a);
+    $("#qqPick", m).innerHTML = `<div class="qq-sel"><div class="row between"><b>${fmtT(a.s)} to ${fmtT(b.e)}</b><span class="num small muted">${len.toFixed(1)} s</span></div>
+      <p class="small muted break" style="margin:6px 0 0">“${esc(a.text.length > 90 ? a.text.slice(0, 90) + "…" : a.text)}”${r[1] > r[0] ? ` … “${esc(b.text.length > 70 ? "…" + b.text.slice(-70) : b.text)}”` : ""}</p>
+      ${d.source ? `<button type="button" class="btn sm" id="qqPlay" style="margin-top:10px">${icon("play")} Play It</button>` : ""}
+      <div style="margin-top:12px"><div class="lbl"><label for="qqTitle">Title on the short</label></div><input class="input" id="qqTitle" type="text" maxlength="100" autocomplete="off" value="${esc(st.title)}"></div>
+      ${bad ? `<p class="err-text small" style="margin:8px 0 0">${bad}</p>` : ""}</div>`;
+    $("#qqPlay", m)?.addEventListener("click", () => play(a.s, b.e + 0.3));
+    $("#qqTitle", m).oninput = (e) => { st.title = e.target.value; st.typed = true; };
+    if (!st.busy) { $("#qqGo", m).disabled = !!bad || !canMake; $("#qqStatus", m).textContent = bad ? "" : "Ready to make"; }
+  };
+  // a search finds one end; the other end rarely has the same word, so show every line again around the pick
+  const pick = (n, other) => {
+    const searching = !!st.q.trim();
+    if (searching) { st.q = ""; $("#qqFind", m).value = ""; }
+    draw();
+    if (v && v.paused) v.currentTime = d.lines[n].s;                       // the preview shows that moment
+    const row = $(`.ql[data-n="${n}"]`, m), box = $("#qqLines", m);
+    if (searching && row && box) {
+      box.scrollTop = Math.max(0, row.offsetTop - box.offsetTop - 60);
+      $("#qqCount", m).textContent = `Showing every line again. Pick the ${other} line.`;
+    }
+  };
+  $("#qqFind", m).oninput = (e) => { st.q = e.target.value; draw(); };
+  $("#qqGo", m).onclick = async () => {
+    const r = range(); if (!r) return;
+    st.busy = true; $("#qqGo", m).disabled = true;
+    $("#qqStatus", m).innerHTML = `<div class="bar wait"><i style="width:0%"></i></div><span class="faint">Waiting in line…</span>`;
+    let job;
+    try { job = await api.post(`/api/transcript/${encodeURIComponent(video)}/clip`, {i0: d.lines[r[0]].i0, i1: d.lines[r[1]].i1, title: st.title.trim()}); }
+    catch (e) { st.busy = false; summary(); $("#qqStatus", m).innerHTML = `<span class="err-text">${esc(e.message)}</span>`; return; }
+    const t = setInterval(async () => {
+      let j; try { j = await api.get("/api/jobs/" + job.id); } catch { return; }
+      const open = document.body.contains(m);
+      if (j.state === "done") {
+        clearInterval(t); st.busy = false; after(); refreshGlobal();
+        toast("Clip ready. It's in the Library too.");
+        if (!open) return;
+        $("#qqDone", m).innerHTML = `<div class="clips" style="margin-top:14px">${j.result.clips.map(clipCard).join("")}</div>`;
+        bindCopy($("#qqDone", m)); bindFix($("#qqDone", m), after);
+        st.first = st.last = null; st.typed = false; draw();
+        $("#qqStatus", m).textContent = "Made. Pick other lines for another clip.";
+        return;
+      }
+      if (j.state === "error" || j.state === "cancelled") {
+        clearInterval(t); st.busy = false;
+        if (open) { summary(); $("#qqStatus", m).innerHTML = `<span class="err-text">${esc(j.error || "Cancelled")}</span>`; } else toast(j.error || "Cancelled", "bad");
+        return;
+      }
+      if (open) $("#qqStatus", m).innerHTML = `<div class="bar ${j.state === "queued" ? "wait" : ""}"><i style="width:${Math.round((j.pct || 0) * 100)}%"></i></div><span class="faint">${esc(j.msg || "Rendering…")}</span>`;
+    }, 1000);
+  };
+  draw();
+  $("#qqFind", m).focus();
+}
+
 // ═════════════════════════ LIBRARY ═════════════════════════
 pages.library = async (el) => {
   el.innerHTML = `<div class="ph"><div><h1>Library</h1><p>Every video you've clipped, and the space it takes. Open one to see its shorts.</p></div></div><div id="libStore"></div><div id="libOut" class="sec"></div>`;
@@ -1228,9 +1337,11 @@ pages.library = async (el) => {
     $$("[data-open]").forEach((b) => b.onclick = () => {
       const it = items.find((x) => x.id === b.dataset.open);
       const m = openModal(`<div class="mh"><div class="row between"><h2 class="break">${esc(it.title)}</h2><button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div>
-        <p class="muted small" style="margin:4px 0 12px">${it.clips.length} shorts. <a href="${esc(it.url)}" target="_blank" rel="noopener">Open the source video</a></p></div>
+        <p class="muted small" style="margin:4px 0 12px">${it.clips.length} shorts. <a href="${esc(it.url)}" target="_blank" rel="noopener">Open the source video</a></p>
+        ${it.mode !== "visual" ? `<button type="button" class="btn sm" data-quote="${esc(it.id)}" style="margin-bottom:12px">${icon("search")} Find a Quote</button>` : ""}</div>
         <div class="mb"><div class="clips">${it.clips.map(clipCard).join("")}</div></div>`, {label: it.title});
       $("[data-close]", m).onclick = () => closeModal(); bindCopy(m); bindFix(m, () => load());
+      $("[data-quote]", m)?.addEventListener("click", () => openQuote(it.id, {after: () => load()}));
     });
     $$("[data-src]").forEach((b) => b.onclick = async () => {
       try { const r = await api.post(`/api/storage/${encodeURIComponent(b.dataset.src)}/source/delete`); toast(`Freed ${fmtBytes(r.freed)} — your shorts are kept`); load(); } catch (e) { fail(e); }

@@ -94,6 +94,11 @@ def _run_job(jid: str) -> None:
         if job["kind"] == "auto":
             from .autopilot import run_profile
             result = run_profile(job["profile_id"], pipeline.run, prog, log)
+        elif job["kind"] == "manual":
+            from . import quickfix
+            o = job["options"]
+            result = quickfix.make_clip(job["url"], o["i0"], o["i1"], o.get("title") or "", o.get("overrides") or {},
+                                        progress=lambda p, m="": prog("render", p, m), log=log)
         elif job["kind"] == "fix":
             from . import quickfix
             o = job["options"]
@@ -157,6 +162,34 @@ def fix_short(body: FixIn):
         raise HTTPException(400, str(e))
     job = _new_job(kind="fix", url=d["rel"], title=d["pick"].get("title") or "",
                    options={"start": body.start, "end": body.end, "words": body.words, "title": body.title})
+    return {"id": job["id"]}
+
+
+class QuoteIn(BaseModel):
+    i0: int
+    i1: int
+    title: str = ""
+
+
+@app.get("/api/transcript/{video}")
+def transcript_lines(video: str):
+    """A video's transcript as sentences: search it, pick a first and last line, make a clip."""
+    from . import quickfix
+    try:
+        return quickfix.transcript(video)
+    except quickfix.FixError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/transcript/{video}/clip")
+def transcript_clip(video: str, body: QuoteIn):
+    from . import quickfix
+    try:
+        quickfix.transcript(video)                    # a clear message now, not after waiting in line
+    except quickfix.FixError as e:
+        raise HTTPException(400, str(e))
+    job = _new_job(kind="manual", url=video, title=body.title,
+                   options={"i0": body.i0, "i1": body.i1, "title": body.title})
     return {"id": job["id"]}
 
 
