@@ -198,7 +198,9 @@ class Engine:
         with self.lock:
             see = (vision_file(model).exists() and str(getattr(cfg, "vision", "auto")).lower() != "off"
                    and not self.gave_up(model, "vision"))
-            if self.running() and self.model == model and self.vision == see:
+            # running without the eyes it couldn't load earlier: they're tried again at its next start, not mid-job
+            later = see and not self.vision and (model, "vision") in self.failed
+            if self.running() and self.model == model and (self.vision == see or later):
                 self.touch()
                 return
             self.stop()

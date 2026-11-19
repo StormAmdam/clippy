@@ -291,6 +291,13 @@ def test_the_built_in_ai_loads_its_vision_file(tmp_path, monkeypatch, tmp_output
     assert eng.gave_up(model, "kv8") and not eng.gave_up(model, "vision")
     eng.failed[(model, "kv8")] -= engine.RETRY_EXTRAS + 1                        # half an hour later: tried again
     assert not eng.gave_up(model, "kv8")
+    # running without eyes that wouldn't load: half an hour later it isn't restarted mid-job just to try again
+    eng.failed[(model, "vision")] = 0.0
+    eng.vision = False
+    monkeypatch.setattr(eng, "running", lambda: True)
+    calls.clear()
+    eng.start(config.Settings(), model)
+    assert calls == []
 
 
 def test_answers_about_shots_are_remembered_for_re_renders(tmp_path):
