@@ -127,9 +127,8 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
         elif visual:
             clips = pick_visual_clips(vision.with_extra(cfg, eyes), info, src, vinfo, env, progress=p, log=log)
             clips = vision.rerank(eyes, clips, src, cfg.clips, log)      # a few extra, the best-looking kept
-        else:
-            clips = pick_clips(vision.with_extra(cfg, eyes), info, tr, progress=p, log=log, env=env)
-            clips = vision.rerank(eyes, clips, src, cfg.clips, log)
+        else:                                           # rated before finalizing: no wasted finishing passes
+            clips = pick_clips(cfg, info, tr, progress=p, log=log, env=env, rank=vision.ranker(eyes, src, log))
         config.write_atomic(picks_file, json.dumps(clips, ensure_ascii=False, indent=2))
 
     rcfg = render_settings(cfg, visual, countdown)

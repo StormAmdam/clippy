@@ -321,7 +321,9 @@ def _auto_teaser(sents, words, a, b, env, emphasis) -> dict | None:
 
 
 def pick_clips(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m: None, log=print,
-               env=None) -> list[dict]:
+               env=None, rank=None) -> list[dict]:
+    """rank: when the AI can see (vision.ranker), it rates how a few more candidates than wanted look, before any
+    is finalized, so only the ones kept get the slow finishing pass."""
     words = transcript["words"]
     if not words:
         raise RuntimeError("No speech found in this video — nothing to clip.")
@@ -410,6 +412,9 @@ def pick_clips(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m
             uniq.append(c)
     if not uniq:
         raise RuntimeError("The AI didn't return any usable clips. Try again, or a different video.")
+    if rank is not None:                      # how they look counts too: rated now, so the extras aren't finalized
+        k = want + min(3, max(1, want // 2))
+        uniq = rank(uniq[:k]) + uniq[k:]
 
     # ── pass 2: refine the best ones
     final = []
@@ -443,6 +448,9 @@ def pick_clips(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m
             meta["teaser"] = _auto_teaser(sents, words, a, b, env, meta.get("emphasis", []))
         clip = _finalize(sents, words, a, b, cfg, lang)
         clip.update(meta, why=c["why"])
+        if c.get("look") is not None:         # 75% what's said, 25% how it looks (vision.ranker)
+            clip.update(look=c["look"], look_why=c.get("look_why", ""), score_said=clip["score"],
+                        score=int(round(0.75 * float(clip["score"]) + 2.5 * c["look"])))
         if any(_overlap(clip, f) > 0.3 for f in final):
             continue
         final.append(clip)

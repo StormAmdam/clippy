@@ -118,3 +118,45 @@ def test_scout_splits_a_chunk_the_ai_says_is_too_long_and_keeps_going(monkeypatc
                               {"words": words, "language": "en"}, log=lambda m: None)
     assert seen["too_long"] >= 1 and seen["ok"] and max(seen["ok"]) <= 4000
     assert len(clips) == 3
+
+
+def test_with_eyes_only_the_kept_candidates_are_finalized(monkeypatch):
+    """vision.ranker rates the rough candidates first: the extras never get the slow finishing pass."""
+    import re
+    refined = []
+
+    class AI:
+        base, model, context = "http://fake/v1", "m", 0
+
+        def __init__(self, cfg, log=print):
+            self.cfg = cfg
+
+        def wait_ready(self, *a, **k):
+            pass
+
+        def budget_chars(self, out_tokens=3000):
+            return 200000
+
+        def json(self, system, user, schema, max_tokens=3000, temperature=0.4):
+            if schema is picker.SCOUT_SCHEMA:
+                return {"clips": [{"start_id": i, "end_id": i + 9, "score": 90 - i, "why": "w", "hook": f"h{i}"}
+                                  for i in (0, 20, 40, 60, 80)]}
+            a = int(re.search(r"Current pick: sentences (\d+)", user).group(1))
+            refined.append(a)
+            return {"thoughts": "", "start_id": a, "end_id": a + 9, "title": f"T{a}", "caption": "c", "hashtags": [],
+                    "emphasis": [], "emoji": [], "teaser_id": -1, "score": 80}
+
+    monkeypatch.setattr(picker, "LLM", AI)
+    looks = {"h0": 2, "h20": 9, "h40": 9, "h60": 3}
+
+    def rank(cands):
+        for c in cands:
+            c["look"], c["look_why"] = looks.get(c["hook"], 5), "why"
+        return sorted(cands, key=lambda c: -(0.75 * c["score"] + 2.5 * c["look"]))
+    words = make_words(" ".join(f"sentence number {i} is here." for i in range(120)))
+    clips = picker.pick_clips(Settings(clips=2, min_seconds=20, max_seconds=40), {"title": "T"},
+                              {"words": words, "language": "en"}, log=lambda m: None, rank=rank)
+    # 4 rated (75, 72.5, 60, 30 by what's said and how it looks); only the best 2 get the finishing pass
+    assert sorted(refined) == [0, 20]
+    assert [c["title"] for c in clips] == ["T20", "T0"] and [c["look"] for c in clips] == [9, 2]
+    assert clips[0]["score"] == round(0.75 * 80 + 2.5 * 9) and clips[0]["score_said"] == 80

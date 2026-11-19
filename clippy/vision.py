@@ -222,6 +222,27 @@ def rerank(eyes: Eyes | None, clips: list[dict], src, want: int, log=print) -> l
     return kept
 
 
+def ranker(eyes: Eyes | None, src, log=print):
+    """For picker.pick_clips: rates how each rough candidate looks and orders them by what's said and how it
+    looks, before the picker finalizes any (None without eyes)."""
+    if eyes is None:
+        return None
+
+    def rank(cands: list[dict]) -> list[dict]:
+        for c in cands:
+            s, e = float(c["start"]), float(c["end"])
+            frames = frames_at(src, [s + (e - s) * f for f in (0.12, 0.38, 0.62, 0.88)])
+            got = eyes.rate(frames, c.get("hook") or "") if frames else None
+            if got is not None:
+                c["look"], c["look_why"] = got
+                log(f"    looks {got[0]}/10: {(c.get('hook') or '')[:60]} ({got[1]})")
+        said = lambda c: float(c["score"]) if c.get("score") is not None else 50.0
+        out = sorted(cands, key=lambda c: -(0.75 * said(c) + 2.5 * (c["look"] if c.get("look") is not None else 5)))
+        log(f"  rated how {len(cands)} candidates look; the best are finalized")
+        return out
+    return rank
+
+
 def with_extra(cfg, eyes: Eyes | None):
     """Settings that ask the picker for a few more candidates when the AI can rate how they look."""
     if eyes is None:
