@@ -375,7 +375,7 @@ def finish_looks(eyes, pending: list[dict], log=lambda m: None) -> None:
         views = {key: _merge(vs) for key, vs in found.items()}
     for i, p in enumerate(pending):
         shots, W, H, fps, cols, webcams = p["shots"], p["W"], p["H"], p["fps"], p["cols"], p["webcams"]
-        changed = seen = 0
+        changed = seen = cams = 0
         for k, shot in enumerate(shots):
             if (i, k) in views:
                 seen += 1
@@ -392,9 +392,10 @@ def finish_looks(eyes, pending: list[dict], log=lambda m: None) -> None:
                         mid = float((np.arange(n) + 0.5) @ c / c.sum()) * W / n
                         subj = (max(0.0, mid - 0.1 * W), 0.0, min(float(W), mid + 0.1 * W), float(H))
                 plan_stream(shot, box, subj, W, H)
-                changed += 1
+                cams += 1
         if seen:
-            log(f"    the AI looked at {seen} shot{'s' if seen != 1 else ''}: {changed} reframed")
+            log(f"    the AI looked at {seen} shot{'s' if seen != 1 else ''}: {changed} reframed"
+                + (f"; the webcam on top in {cams} more" if cams else ""))
         elif webcams:
             log(f"    a streamer's webcam in {len(webcams)} shot{'s' if len(webcams) != 1 else ''}: webcam on top")
 
