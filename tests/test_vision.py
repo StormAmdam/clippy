@@ -231,17 +231,58 @@ def test_the_built_in_ai_loads_its_vision_file(tmp_path, monkeypatch, tmp_output
     assert engine.vision_file(model).name == "Qwen3.5-4B-Q4_K_M.mmproj.gguf"
     assert next(r for r in engine.models(config.load()) if r["file"] == model.name)["vision"] == "ready"
     assert engine._files() == [model]                                          # the vision file isn't a model
-    seen = {}
-
     class Proc:
         def poll(self):
             return 1
     monkeypatch.setattr(components, "engine_exe", lambda: tmp_path / "llama-server")
     monkeypatch.setattr(components, "hardware", lambda: {"threads": 4, "vram_mb": 8000, "ram_mb": 16000})
-    monkeypatch.setattr(engine.subprocess, "Popen", lambda args, **k: seen.update(args=args) or Proc())
+    calls = []
+    monkeypatch.setattr(engine.subprocess, "Popen", lambda args, **k: calls.append(args) or Proc())
     with pytest.raises(RuntimeError):
         engine.Engine().start(config.Settings(), model)
-    assert seen["args"][-2:] == ["--mmproj", "Qwen3.5-4B-Q4_K_M.mmproj.gguf"]
+    first, retry = calls
+    assert first[-6:] == ["--mmproj", "Qwen3.5-4B-Q4_K_M.mmproj.gguf", *engine.KV8]   # its eyes, 8-bit memory
+    assert retry[-2:] == ["--mmproj", "Qwen3.5-4B-Q4_K_M.mmproj.gguf"]              # an engine that can't: without
+    calls.clear()
     with pytest.raises(RuntimeError):
         engine.Engine().start(config.Settings(vision="off"), model)
-    assert "--mmproj" not in seen["args"]
+    assert all("--mmproj" not in a for a in calls)
+
+
+def test_answers_about_shots_are_remembered_for_re_renders(tmp_path):
+    fake = FakeLLM({"frames": [{"n": 1, "kind": "scene", "subject": [100, 100, 500, 900], "cam": [], "wide": False},
+                               {"n": 2, "kind": "talking", "subject": [300, 0, 700, 1000], "cam": [], "wide": False}]})
+    eyes = vision.Eyes(fake, log=lambda m: None)
+    frames = [np.zeros((288, 512, 3), np.uint8)] * 2
+    cache = tmp_path / "vision.json"
+    first = eyes.shots(frames, keys=["10.00", "12.50"], cache=cache)
+    again = eyes.shots(frames, keys=["10.00", "12.50"], cache=cache)
+    assert fake.calls == [2] and again == first                     # asked once, remembered after
+    eyes.shots(frames[:1] * 2, keys=["10.00", "20.00"], cache=cache)
+    assert fake.calls == [2, 1]                                      # only the new frame is asked about
+    cache.write_text(cache.read_text().replace('"v": 2', '"v": 1'))   # answers from older instructions: asked again
+    eyes.shots(frames, keys=["10.00", "12.50"], cache=cache)
+    assert fake.calls == [2, 1, 2]
+
+
+def test_a_clip_and_its_teaser_are_asked_about_in_one_request(tmp_path):
+    from clippy import render
+    from clippy.download import video_stream_info
+    from tests.conftest import make_words
+    src = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=6", "-pix_fmt",
+                    "yuv420p", str(src)], check=True)
+    calls = []
+
+    class Eyes:
+        def shots(self, frames, keys=None, cache=None):
+            calls.append(len(frames))
+            h, w = frames[0].shape[:2]
+            return [{"kind": "scene", "subject": (0.1 * w, 0.2 * h, 0.25 * w, 0.95 * h), "cam": None, "wide": False,
+                     "scale": (w, h)} for _ in frames]
+    words = make_words("one two three four five six seven eight nine ten", start=0.3, step=0.5)
+    clip = {"start": 0.0, "end": 5.5, "i0": 0, "i1": 10, "title": "T",
+            "teaser": {"start": 3.0, "end": 4.5, "i0": 6, "i1": 9}}
+    parts = render.plan(config.Settings(teaser=True), src, video_stream_info(src), clip, words, None, eyes=Eyes())
+    assert [p.kind for p in parts] == ["teaser", "main"] and len(calls) == 1 and calls[0] >= 2
+    assert all(s.layout == "crop" for p in parts for s in p.shots)            # both parts framed on the subject

@@ -206,8 +206,9 @@ def face_detector(w: int, h: int, score: float = 0.38):
 
 def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, split_screen: bool = True,
             progress=lambda p: None, fps_str: str | None = None, no_captions: bool = False, eyes=None,
-            log=lambda m: None) -> list[Shot]:
-    """eyes: clippy.vision.Eyes, when the AI can see: it says what matters in each shot (see apply_view)."""
+            log=lambda m: None, look_later: list | None = None) -> list[Shot]:
+    """eyes: clippy.vision.Eyes, when the AI can see: it says what matters in each shot (see apply_view).
+    look_later: collect what to ask instead (finish_looks asks once for several parts)."""
     aw = min(ANALYSIS_W, W)
     ah = even(H * aw / W)
     sx, sy = W / aw, H / ah
@@ -316,59 +317,91 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
                 continue
         shot.fit_crop = None
         _plan_crop(shot, main, a, b, fps, W, crop_w_full)
-    views = _look(eyes, shots, thumbs, fps, W, H) if eyes is not None and thumbs and not portrait_src else {}
-    changed = 0
-    for k, shot in enumerate(shots):
-        if k in views:
-            changed += bool(apply_view(shot, views[k], W, H, fps, cols.get(k), no_captions))
-        elif k in webcams:                     # no AI eyes: the webcam rule, the action where things move
-            box = webcam_box(webcams[k], W, H)
-            col = cols.get(k)
-            subj = None
-            if col is not None:
-                c = np.array(col, dtype=np.float64)
-                n = len(c)
-                c[int(box[0] / W * n): int(np.ceil(box[2] / W * n))] = 0
-                if c.sum() > 0:
-                    mid = float((np.arange(n) + 0.5) @ c / c.sum()) * W / n
-                    subj = (max(0.0, mid - 0.1 * W), 0.0, min(float(W), mid + 0.1 * W), float(H))
-            plan_stream(shot, box, subj, W, H)
-            changed += 1
-    if views:
-        log(f"    the AI looked at {len(views)} shot{'s' if len(views) != 1 else ''}: {changed} reframed")
-    elif webcams:
-        log(f"    a streamer's webcam in {len(webcams)} shot{'s' if len(webcams) != 1 else ''}: webcam on top")
+    pending = {"shots": shots, "thumbs": thumbs, "fps": fps, "W": W, "H": H, "src": src, "start": start,
+               "cols": cols, "webcams": webcams, "no_captions": no_captions,
+               "look": eyes is not None and bool(thumbs) and not portrait_src}
+    if look_later is not None:                 # plan() asks the AI once for all of a clip's parts
+        look_later.append(pending)
+    else:
+        finish_looks(eyes, [pending], log)
     progress(1.0)
     return shots
 
 
-def _look(eyes, shots: list[Shot], thumbs: dict[int, np.ndarray], fps: float, W: int, H: int) -> dict[int, dict]:
-    """Ask the AI about each shot: one frame from its middle, two (merged) for longer shots."""
+def finish_looks(eyes, pending: list[dict], log=lambda m: None) -> None:
+    """Ask the AI once about the shots of all these parts (teaser and main clip together), then frame every shot:
+    its answer where there is one, otherwise the webcam rule or the usual framing."""
+    from pathlib import Path
+
     from .vision import MAX_IMAGES
-    asks: list[tuple[int, int]] = []           # (shot index, frame index)
-    longest = sorted(range(len(shots)), key=lambda k: -(shots[k].f1 - shots[k].f0))
-    for k in longest:                          # one request per clip: the longest shots matter most
+    asks: list[tuple[int, int, int]] = []      # (part, shot, frame index)
+    looking = [i for i, p in enumerate(pending) if p["look"]]
+    for i in looking:                          # each part gets its share; the longest shots first
+        p = pending[i]
+        share = max(1, MAX_IMAGES * sum(s.f1 - s.f0 for s in p["shots"]) //
+                    max(1, sum(sum(s.f1 - s.f0 for s in pending[j]["shots"]) for j in looking)))
+        asks += [(i, k, fi) for k, fi in _asks(p["shots"], p["thumbs"], p["fps"], share)]
+    asks = asks[:MAX_IMAGES]
+    views: dict[tuple[int, int], dict] = {}
+    if asks and eyes is not None:
+        frames = [pending[i]["thumbs"][fi] for i, _, fi in asks]
+        keys = [f"{pending[i]['start'] + fi / pending[i]['fps']:.2f}" for i, _, fi in asks]
+        src = pending[asks[0][0]]["src"]
+        try:
+            got = eyes.shots(frames, keys=keys, cache=Path(src).with_name("vision.json") if src else None)
+        except TypeError:                      # eyes without a memory (tests)
+            got = eyes.shots(frames)
+        found: dict[tuple[int, int], list] = {}
+        for (i, k, _), v in zip(asks, got):
+            if v is None:
+                continue
+            W, H = pending[i]["W"], pending[i]["H"]
+            tw, th = v.get("scale") or (W, H)  # the AI saw a small frame: its boxes back to source pixels
+            up = lambda b, W=W, H=H, tw=tw, th=th: None if b is None else (b[0] * W / tw, b[1] * H / th,
+                                                                           b[2] * W / tw, b[3] * H / th)
+            found.setdefault((i, k), []).append({**v, "subject": up(v.get("subject")), "cam": up(v.get("cam"))})
+        views = {key: _merge(vs) for key, vs in found.items()}
+    for i, p in enumerate(pending):
+        shots, W, H, fps, cols, webcams = p["shots"], p["W"], p["H"], p["fps"], p["cols"], p["webcams"]
+        changed = seen = 0
+        for k, shot in enumerate(shots):
+            if (i, k) in views:
+                seen += 1
+                changed += bool(apply_view(shot, views[(i, k)], W, H, fps, cols.get(k), p["no_captions"]))
+            elif k in webcams:                 # no AI answer: the webcam rule, the action where things move
+                box = webcam_box(webcams[k], W, H)
+                col = cols.get(k)
+                subj = None
+                if col is not None:
+                    c = np.array(col, dtype=np.float64)
+                    n = len(c)
+                    c[int(box[0] / W * n): int(np.ceil(box[2] / W * n))] = 0
+                    if c.sum() > 0:
+                        mid = float((np.arange(n) + 0.5) @ c / c.sum()) * W / n
+                        subj = (max(0.0, mid - 0.1 * W), 0.0, min(float(W), mid + 0.1 * W), float(H))
+                plan_stream(shot, box, subj, W, H)
+                changed += 1
+        if seen:
+            log(f"    the AI looked at {seen} shot{'s' if seen != 1 else ''}: {changed} reframed")
+        elif webcams:
+            log(f"    a streamer's webcam in {len(webcams)} shot{'s' if len(webcams) != 1 else ''}: webcam on top")
+
+
+def _asks(shots: list[Shot], thumbs: dict[int, np.ndarray], fps: float, budget: int) -> list[tuple[int, int]]:
+    """Which frames to show the AI: one from the middle of each shot, two for long ones; the longest shots first,
+    in the video's order, at most `budget`."""
+    asks: list[tuple[int, int]] = []
+    for k in sorted(range(len(shots)), key=lambda k: -(shots[k].f1 - shots[k].f0)):
         shot = shots[k]
         inside = sorted(fi for fi in thumbs if shot.f0 <= fi < shot.f1)
-        if not inside or len(asks) >= MAX_IMAGES:
+        if not inside or len(asks) >= budget:
             continue
-        if (shot.f1 - shot.f0) / fps > 8 and len(inside) >= 2 and len(asks) + 2 <= MAX_IMAGES:
+        if (shot.f1 - shot.f0) / fps > 8 and len(inside) >= 2 and len(asks) + 2 <= budget:
             picks = [inside[len(inside) // 3], inside[(2 * len(inside)) // 3]]
         else:
             picks = [inside[len(inside) // 2]]
         asks += [(k, fi) for fi in dict.fromkeys(picks)]
-    if not asks:
-        return {}
-    asks.sort(key=lambda a: a[1])              # shown in the video's order
-    got = eyes.shots([thumbs[fi] for _, fi in asks])
-    views: dict[int, dict] = {}
-    for (k, _), v in zip(asks, got):
-        if v is None:
-            continue
-        tw, th = v.get("scale") or (W, H)       # the AI saw a small frame: its boxes back to source pixels
-        up = lambda b: None if b is None else (b[0] * W / tw, b[1] * H / th, b[2] * W / tw, b[3] * H / th)
-        views.setdefault(k, []).append({**v, "subject": up(v.get("subject")), "cam": up(v.get("cam"))})
-    return {k: _merge(vs) for k, vs in views.items()}
+    return sorted(asks, key=lambda a: a[1])
 
 
 def _merge(vs: list[dict]) -> dict:

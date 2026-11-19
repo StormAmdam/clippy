@@ -7,13 +7,16 @@
 from __future__ import annotations
 
 import bisect
+import concurrent.futures as cf
 import json
+import os
 import queue
 import re
 import shutil
 import subprocess
 import tempfile
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,8 +26,13 @@ import numpy as np
 from . import gpu, sfx
 from .config import Settings
 from .overlay import Overlay
-from .reframe import OUT_H, OUT_W, FrameStream, analyze, compose, frame_reader, layout_positions
+from .reframe import OUT_H, OUT_W, FrameStream, analyze, compose, finish_looks, frame_reader, layout_positions
 from .transcribe import ENV_HZ
+
+# threads that compose frames, and that ffmpeg's filters (sharpening) use: half the CPU, at most 4. Same frames as one
+# thread, faster (sharpening on one thread was the slowest step of a render)
+COMPOSE_WORKERS = max(1, min(4, (os.cpu_count() or 2) // 2))
+FILTER_THREADS = COMPOSE_WORKERS
 
 
 # ───────────────────────── silence → jump cuts ─────────────────────────
@@ -224,12 +232,12 @@ def _encoder_args(cfg: Settings, nvenc: bool) -> list[str]:
 # ───────────────────────── main entry ─────────────────────────
 
 def render_clip(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[dict], env: np.ndarray | None,
-                out_path: Path, progress=lambda p, m: None, log=print, eyes=None) -> dict:
+                out_path: Path, progress=lambda p, m: None, log=print, eyes=None, parts=None) -> dict:
     """Render one clip. On any failure or cancel, leaves no partial video, thumbnail or temp folder behind.
     eyes: clippy.vision.Eyes when the AI can see, so the framing keeps what matters in the picture."""
     tmp = Path(tempfile.mkdtemp(prefix="clippy-", dir=out_path.parent))
     try:
-        return _render(cfg, src, vinfo, clip, words_all, env, out_path, tmp, progress, log, eyes)
+        return _render(cfg, src, vinfo, clip, words_all, env, out_path, tmp, progress, log, eyes, parts)
     except BaseException:
         for f in (out_path, out_path.with_suffix(".jpg")):
             f.unlink(missing_ok=True)
@@ -238,13 +246,15 @@ def render_clip(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: li
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[dict], env: np.ndarray | None,
-            out_path: Path, tmp: Path, progress, log, eyes=None) -> dict:
+def plan(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[dict], env: np.ndarray | None,
+         eyes=None, log=print, progress=lambda p, m="": None) -> list:
+    """A clip's parts and their shots (faces, cuts, framing, the AI's look): everything before the frames are made.
+    pipeline.run plans the next clip while this one renders; render_clip(parts=…) then skips it."""
     fps, fps_str = vinfo["fps"], vinfo.get("fps_str") or f'{vinfo["fps"]:.6f}'
     W, H = vinfo["width"], vinfo["height"]
     srcs = str(src)
 
-    # 1) parts: optional flash-forward teaser + the main clip, or a countdown's moments (#3, #2, #1)
+    # parts: optional flash-forward teaser + the main clip, or a countdown's moments (#3, #2, #1)
     specs = []
     moments = clip.get("segments") or []
     tz = clip.get("teaser")
@@ -256,15 +266,32 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
         specs.append(("main", clip["start"], clip["end"], words_all[clip["i0"]: clip["i1"]]))
 
     parts: list[Part] = []
+    looks: list = []                               # what to ask the AI, for all parts in one go (finish_looks)
     for k, (kind, s, e, words) in enumerate(specs):
         n = int(round((e - s) * fps))
         lo, hi = k / len(specs), (k + 1) / len(specs)
         shots = analyze(srcs, s, n, fps, W, H, cfg.split_screen, fps_str=fps_str, no_captions=not words_all,
                         progress=lambda p, lo=lo, hi=hi: progress(0.2 * (lo + (hi - lo) * p), "Finding faces & camera cuts…"),
-                        eyes=eyes, log=log)
+                        eyes=eyes, log=log, look_later=looks)
         n = shots[-1].f1
         keeps = keep_intervals(words, s, n / fps, fps, env, cfg) if kind != "teaser" else [(0, n)]
         parts.append(Part(kind, s, words, shots, keeps, n))
+    finish_looks(eyes, looks, log)                 # the teaser and the clip: one request, then every shot framed
+    return parts
+
+
+def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[dict], env: np.ndarray | None,
+            out_path: Path, tmp: Path, progress, log, eyes=None, parts=None) -> dict:
+    fps, fps_str = vinfo["fps"], vinfo.get("fps_str") or f'{vinfo["fps"]:.6f}'
+    W, H = vinfo["width"], vinfo["height"]
+    srcs = str(src)
+
+    moments = clip.get("segments") or []           # a countdown's moments (#3, #2, #1)
+    # 1) parts (planned already when the pipeline looked ahead)
+    if parts is None:
+        parts = plan(cfg, src, vinfo, clip, words_all, env, eyes, log, progress)
+    else:
+        progress(0.2, "Finding faces & camera cuts…")
 
     out0 = 0
     for p in parts:
@@ -426,7 +453,7 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
 
     def encode(nvenc: bool) -> tuple[int, str]:
         hw = gpu.has_cuda_decode() and (gpu.free_vram_mb() or 0) > 2500
-        cmd = ["ffmpeg", "-v", "error", "-y", "-nostdin",
+        cmd = ["ffmpeg", "-v", "error", "-y", "-nostdin", "-filter_complex_threads", str(FILTER_THREADS),
                "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{OUT_W}x{OUT_H}", "-r", fps_str, "-i", "-"]
         if has_audio:
             cmd += _part_inputs(srcs, parts, fps)
@@ -488,6 +515,21 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
             reader_t.start()
             writer_t.start()
             finished = False
+            # frames are composed on a few threads (OpenCV and NumPy work outside Python's lock) and written in order
+            pool = cf.ThreadPoolExecutor(max_workers=COMPOSE_WORKERS, thread_name_prefix="compose")
+            pending: deque = deque()
+
+            def drain(keep: int) -> bool:
+                """Write finished frames in order, leaving at most `keep` still being composed."""
+                nonlocal last, written
+                while pending and (len(pending) > keep or pending[0].done()):
+                    last = pending.popleft().result()
+                    if not put(out_q, last):
+                        return False
+                    written += 1
+                    if written % 12 == 0:
+                        progress(0.2 + 0.8 * written / max(1, n_out), "Rendering…")
+                return True
             try:
                 ptr, last = 0, None
                 while not stop.is_set():
@@ -499,6 +541,8 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
                         raise i
                     ent = parts[pi].entries
                     if i is None:                                    # this part is fully decoded
+                        if not drain(0):
+                            break
                         while ptr < len(ent) and last is not None:   # source ended early: hold last frame
                             if not put(out_q, last):
                                 break
@@ -510,15 +554,15 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
                         continue
                     while ptr < len(ent) and ent[ptr][1] == i:
                         o, src_i, si, _ = ent[ptr]
-                        last = render_frame(frame, parts[pi], si, src_i, o).tobytes()
-                        if not put(out_q, last):
-                            break
-                        written += 1
+                        pending.append(pool.submit(lambda f=frame, p=parts[pi], si=si, src_i=src_i, o=o:
+                                                   render_frame(f, p, si, src_i, o).tobytes()))
                         ptr += 1
-                        if written % 12 == 0:
-                            progress(0.2 + 0.8 * written / max(1, n_out), "Rendering…")
+                        if not drain(2 * COMPOSE_WORKERS):
+                            break
+                drain(0)
                 finished = True
             finally:
+                pool.shutdown(wait=True, cancel_futures=True)
                 if finished:
                     put(out_q, None)          # writer flushes everything still queued, then exits
                     writer_t.join()

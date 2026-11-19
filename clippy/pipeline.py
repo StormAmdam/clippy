@@ -147,22 +147,34 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
                 raise RuntimeError(f"Couldn't replace the earlier short {old.name}: it's open in another program "
                                    "(a video player, perhaps). Close it and try again.") from None
     results = []
-    for i, clip in enumerate(clips):
-        name = f"{_slug(clip.get('title') or 'top')}.mp4" if countdown else \
-            f"{i + 1:02d}-{_slug(clip.get('title') or 'clip')}.mp4"
-        out = out_dir / name
-        log(f"  rendering {name}")
-        sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
-        stats = render_clip(rcfg, src, vinfo, clip, words, env, out, progress=sub, log=log, eyes=eyes)
-        config.write_atomic(sidecar(out), json.dumps({"pick": clip, "overrides": made_with, "visual": visual,
-                                                      "countdown": countdown}, ensure_ascii=False))
-        extra = {"format": "top", "ranks": [{"rank": s["rank"], "label": s["label"], "start": s["start"],
-                                            "end": s["end"]} for s in clip["segments"]]} if clip.get("segments") else {}
-        results.append({**{k: clip.get(k) for k in ("title", "caption", "hashtags", "score", "why", "start", "end",
-                                                     "look", "look_why")},
-                        **stats, **extra, "file": str(out.relative_to(config.output_root(cfg))),
-                        "thumb": str(out.with_suffix(".jpg").relative_to(config.output_root(cfg)))})
-        extensions.run_hook("clip_rendered", log=log, path=out, clip=dict(results[-1]), video=dict(info))
+    # while one clip renders, the next one is planned (faces, cuts, the AI's look at its shots): same shorts, sooner
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .render import plan
+    ahead = ThreadPoolExecutor(max_workers=1, thread_name_prefix="plan-next")
+    plan_of = lambda c: ahead.submit(plan, rcfg, src, vinfo, c, words, env, eyes, log)
+    nxt = plan_of(clips[0]) if clips else None
+    try:
+        for i, clip in enumerate(clips):
+            parts = nxt.result()
+            nxt = plan_of(clips[i + 1]) if i + 1 < len(clips) else None
+            name = f"{_slug(clip.get('title') or 'top')}.mp4" if countdown else \
+                f"{i + 1:02d}-{_slug(clip.get('title') or 'clip')}.mp4"
+            out = out_dir / name
+            log(f"  rendering {name}")
+            sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
+            stats = render_clip(rcfg, src, vinfo, clip, words, env, out, progress=sub, log=log, eyes=eyes, parts=parts)
+            config.write_atomic(sidecar(out), json.dumps({"pick": clip, "overrides": made_with, "visual": visual,
+                                                          "countdown": countdown}, ensure_ascii=False))
+            extra = {"format": "top", "ranks": [{"rank": s["rank"], "label": s["label"], "start": s["start"],
+                                                "end": s["end"]} for s in clip["segments"]]} if clip.get("segments") else {}
+            results.append({**{k: clip.get(k) for k in ("title", "caption", "hashtags", "score", "why", "start", "end",
+                                                         "look", "look_why")},
+                            **stats, **extra, "file": str(out.relative_to(config.output_root(cfg))),
+                            "thumb": str(out.with_suffix(".jpg").relative_to(config.output_root(cfg)))})
+            extensions.run_hook("clip_rendered", log=log, path=out, clip=dict(results[-1]), video=dict(info))
+    finally:                                            # a failed or cancelled render: the look-ahead stops
+        ahead.shutdown(wait=False, cancel_futures=True)
 
     summary = {"id": info["id"], "title": info["title"], "url": info.get("webpage_url", url),
                "uploader": info.get("uploader", ""), "language": tr.get("language"),

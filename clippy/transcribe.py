@@ -34,6 +34,25 @@ def loudness_envelope(audio: np.ndarray) -> np.ndarray:
     return (20 * np.log10(rms + 1e-9)).astype(np.float32)
 
 
+LOW_VRAM_MB = 1000                    # free graphics memory below this: the CPU
+# on the GPU, from the fastest to the leanest (out of memory → the next one, the CPU only after the last).
+# Batch size doesn't change what's heard, only how many pieces go through the GPU at once.
+GPU_STEPS = [("float16", 8), ("int8_float16", 8), ("int8_float16", 4), ("int8_float16", 2)]
+
+
+def _gpu_trouble(e: Exception) -> bool:
+    t = str(e)
+    return "CUDA" in t or "cuDNN" in t or "cublas" in t.lower() or "out of memory" in t.lower()
+
+
+def gpu_steps(compute: str, free_mb: int) -> list[tuple[str, int]]:
+    """The GPU settings to try, starting where this much free memory allows."""
+    steps = [st for st in GPU_STEPS if compute == "float16" or st[0] == compute]
+    if compute != "float16" and free_mb < 1400:          # very little free: start with small batches
+        steps = [st for st in steps if st[1] <= 2]
+    return steps
+
+
 def _pick_device(cfg: Settings, log) -> tuple[str, str, str | None]:
     """Returns (device, compute_type, service_to_restart)."""
     if cfg.whisper_device == "cpu":
@@ -46,7 +65,7 @@ def _pick_device(cfg: Settings, log) -> tuple[str, str, str | None]:
     except Exception:
         return "cpu", "int8", None
 
-    need_fp16, need_int8 = 2600, 1400
+    need_fp16 = 2600
     free = gpu.free_vram_mb() or 0
     paused = None
     if free < need_fp16 and cfg.free_gpu_for_whisper and gpu.service_active(cfg.llama_service):
@@ -72,7 +91,7 @@ def _pick_device(cfg: Settings, log) -> tuple[str, str, str | None]:
                 time.sleep(0.5)
     if free >= need_fp16:
         return "cuda", "float16", paused
-    if free >= need_int8:
+    if free >= LOW_VRAM_MB:                   # small or busy card: 8-bit, small batches (see GPU_STEPS), still the GPU
         return "cuda", "int8_float16", paused
     tip = ("Close other programs that use the graphics card (games, other AI apps) to transcribe faster."
            if sys.platform == "win32" else "Tip: set free_gpu_for_whisper = true and llama_service in config.toml.")
@@ -109,9 +128,11 @@ def transcribe(cfg: Settings, media: Path, workdir: Path, progress=lambda p, m: 
     from faster_whisper import BatchedInferencePipeline, WhisperModel
 
     device, compute, paused = _pick_device(cfg, log)
+    tries = [("cuda", c, b) for c, b in gpu_steps(compute, gpu.free_vram_mb() or 0)] if device == "cuda" else []
+    tries.append(("cpu", "int8", 0))
     model = None
     try:
-        for attempt in range(2):
+        for attempt, (device, compute, batch) in enumerate(tries):
             try:
                 log(f"Whisper {cfg.whisper_model} on {device.upper()} ({compute})")
                 progress(0.02, f"Loading Whisper on {device.upper()}…")
@@ -122,7 +143,8 @@ def transcribe(cfg: Settings, media: Path, workdir: Path, progress=lambda p, m: 
                 common = dict(word_timestamps=True, vad_filter=True,
                               vad_parameters={"min_silence_duration_ms": 500})
                 if device == "cuda":
-                    segs, info = BatchedInferencePipeline(model).transcribe(audio, batch_size=8, beam_size=5, **common)
+                    segs, info = BatchedInferencePipeline(model).transcribe(audio, batch_size=batch, beam_size=5,
+                                                                            **common)
                 else:
                     segs, info = model.transcribe(audio, beam_size=1, condition_on_previous_text=False, **common)
                 words, segments = [], []
@@ -141,11 +163,12 @@ def transcribe(cfg: Settings, media: Path, workdir: Path, progress=lambda p, m: 
                         words.extend(seg_words)
                 break
             except RuntimeError as e:
-                if device == "cuda" and attempt == 0 and ("CUDA" in str(e) or "cuDNN" in str(e) or "cublas" in str(e).lower()):
-                    log(f"GPU transcription failed ({e}); retrying on CPU")
-                    del model
+                if device == "cuda" and attempt + 1 < len(tries) and _gpu_trouble(e):
+                    nxt = tries[attempt + 1]
+                    log(f"GPU transcription failed ({str(e)[:120]}); trying "
+                        + (f"the GPU with less memory ({nxt[1]}, {nxt[2]} at a time)" if nxt[0] == "cuda" else "the CPU"))
+                    model = None
                     gc.collect()
-                    device, compute = "cpu", "int8"
                     continue
                 raise
     finally:

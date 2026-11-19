@@ -26,6 +26,7 @@ CATALOG = [{"id": m["file"].removesuffix(".gguf"), "name": ABOUT[m["size"]][0], 
             "mmproj_url": f"https://huggingface.co/{m['repo']}/resolve/main/{m['mmproj']}" if m.get("mmproj") else "",
             "mmproj_gb": m.get("mmproj_gb", 0)} for m in aisetup.GGUF_MODELS]
 CONTEXT = 32768
+KV8 = ["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]   # like tools/ai-server/llama-coder
 
 
 def _files() -> list[Path]:
@@ -164,6 +165,7 @@ class Engine:
         self.proc: subprocess.Popen | None = None
         self.model: Path | None = None
         self.vision = False
+        self.kv8 = True                                  # until an engine says it can't (see start)
         self.port = 0
         self.context = 0
         self.last_used = 0.0
@@ -204,6 +206,8 @@ class Engine:
                     "--fit", "on", "--fit-target", "4500" if hw["vram_mb"] >= 10 * 1024 else "1024"]
             if see:                                      # its eyes (clippy/vision.py), by name from the same folder
                 args += ["--mmproj", vision_file(model).name]
+            if self.kv8:                                 # 8-bit working memory: half the size, so more of the model
+                args += KV8                              # fits on a small graphics card (the same picks)
             # Windows: tied to Clippy (clippy/quiet.py), so it ends when Clippy does, even if Clippy crashes
             extra = {"start_new_session": True} if sys.platform != "win32" else components.hidden()
             with open(log_file, "ab") as log:
@@ -215,6 +219,9 @@ class Engine:
                 if self.proc.poll() is not None:
                     tail = log_file.read_bytes()[-600:].decode(errors="replace")
                     self.proc = None
+                    if self.kv8:                         # an engine or card that can't: the usual memory, once more
+                        self.kv8 = False
+                        return self.start(cfg, model)
                     raise RuntimeError(f"The AI engine stopped while loading {model.stem}. Last lines of its log:\n{tail}")
                 try:
                     if httpx.get(f"http://127.0.0.1:{port}/health", timeout=2).status_code == 200:

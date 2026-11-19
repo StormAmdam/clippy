@@ -8,6 +8,8 @@ from __future__ import annotations
 import math
 import random
 import re
+import threading
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -154,6 +156,7 @@ class Overlay:
     def __init__(self, cfg: Settings, words: list[dict], duration: float, title: str, emphasis: list[str],
                  emojis: list[dict], layout_at, style: str | dict | None = None, ranks: list[dict] | None = None):
         self.cfg = cfg
+        self._lock = threading.RLock()                  # making caption/emoji images (fonts can't draw in parallel)
         name = style or cfg.caption_style
         if isinstance(name, dict):                       # a style given whole (tools/style_preview.py)
             self.st = dict(name)
@@ -299,9 +302,18 @@ class Overlay:
             d.text((x, y), t, font=self.font, fill=col + (255,), stroke_width=stroke, stroke_fill=(0, 0, 0, 255))
 
     def _chunk_sprites(self, c: Chunk, j: int):
+        """The caption line's images, made once. Frames are composed on several threads (render.py), and the font
+        library can't draw from two at once, so making them is locked; using them isn't."""
         key = j
-        if key in c.sprites:
-            return c.sprites[key]
+        spr = c.sprites.get(key)
+        if spr is not None:
+            return spr
+        with self._lock:                       # (old states are dropped inside the lock; a dropped one is remade)
+            spr = c.sprites.get(key)
+            return spr if spr is not None else self._make_chunk_sprites(c, j)
+
+    def _make_chunk_sprites(self, c: Chunk, j: int):
+        key = j
         st = self.st
         texts = [w.text for w in c.words]
         pos, widths, W, H = self._layout(texts)
@@ -347,7 +359,7 @@ class Overlay:
         else:
             self._draw_text(canvas, [(padw, self.pad, w.text, col)], st["stroke"])
         if st["tilt"]:
-            rnd = random.Random(hash((w.text, round(w.s, 2))))
+            rnd = random.Random(zlib.crc32(f"{w.text}|{round(w.s, 2)}".encode()))   # the same tilt every render
             ang = rnd.uniform(-st["tilt"], st["tilt"])
             canvas = canvas.rotate(ang, resample=Image.BICUBIC, expand=False)
         # centre of the word slot relative to the line-sprite centre
@@ -357,6 +369,10 @@ class Overlay:
     def _emoji(self, e: str):
         if e in self._emoji_cache:
             return self._emoji_cache[e]
+        with self._lock:
+            return self._emoji_cache[e] if e in self._emoji_cache else self._make_emoji(e)
+
+    def _make_emoji(self, e: str):
         spr = None
         if self.emoji_font:
             try:

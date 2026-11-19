@@ -18,6 +18,7 @@ import cv2
 import numpy as np
 
 KINDS = ("talking", "stream", "scene", "screen")
+CACHE_VERSION = 2                   # bump when SHOTS_PROMPT changes: remembered answers then count as new
 MAX_IMAGES = 10                     # per request: enough for a clip's shots, small enough for a local model
 
 SHOTS_SYSTEM = """You frame shots for vertical 9:16 phone videos (TikTok, YouTube Shorts). You look at frames from a \
@@ -90,8 +91,25 @@ class Eyes:
     def __init__(self, llm, log=print):
         self.llm, self.log = llm, log
 
-    def shots(self, frames: list[np.ndarray]) -> list[dict | None]:
-        """For each frame: {"kind", "subject": box px | None, "cam": box px | None, "wide"}; None when unsure."""
+    def shots(self, frames: list[np.ndarray], keys: list[str] | None = None, cache=None) -> list[dict | None]:
+        """For each frame: {"kind", "subject": box px | None, "cam": box px | None, "wide"}; None when unsure.
+        keys/cache: answers remembered per frame (its time in the video) in a JSON file next to the video, so
+        re-rendering a short (Quick Fix, a new look) doesn't ask again."""
+        known = _read_cache(cache) if cache and keys else {}
+        if keys and all(k in known for k in keys):
+            return [known[k] for k in keys]
+        ask = [i for i in range(len(frames)) if not keys or keys[i] not in known]
+        got = self._ask_shots([frames[i] for i in ask])
+        out: list[dict | None] = [known.get(k) for k in keys] if keys else [None] * len(frames)
+        for i, v in zip(ask, got):
+            out[i] = v
+            if keys and v is not None:
+                known[keys[i]] = v
+        if cache and keys:
+            _write_cache(cache, known)
+        return out
+
+    def _ask_shots(self, frames: list[np.ndarray]) -> list[dict | None]:
         out: list[dict | None] = []
         for i in range(0, len(frames), MAX_IMAGES):
             part = frames[i:i + MAX_IMAGES]
@@ -119,6 +137,29 @@ class Eyes:
         except Exception as e:
             self.log(f"    the AI couldn't rate the clip's look ({str(e)[:120]})")
             return None
+
+
+def _read_cache(path) -> dict:
+    try:
+        import json
+        data = json.loads(open(path, encoding="utf-8").read())
+        if data.get("v") != CACHE_VERSION:
+            return {}
+        return {k: {**v, "subject": tuple(v["subject"]) if v.get("subject") else None,
+                    "cam": tuple(v["cam"]) if v.get("cam") else None, "scale": tuple(v["scale"])}
+                for k, v in (data.get("shots") or {}).items() if isinstance(v, dict) and v.get("scale")}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {}
+
+
+def _write_cache(path, shots: dict) -> None:
+    import json
+
+    from . import config
+    try:
+        config.write_atomic(path, json.dumps({"v": CACHE_VERSION, "shots": shots}))
+    except OSError:
+        pass
 
 
 def eyes_for(cfg, log=print) -> Eyes | None:
