@@ -125,7 +125,7 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
                                            max_seconds=cfg.top_max)
                 clips = [top.from_visual(cfg, pick_visual_clips(many, info, src, vinfo, env, progress=p, log=log))]
             else:
-                clips = [top.pick_top(cfg, info, tr, progress=p, log=log, env=env)]
+                clips = [top.pick_top(cfg, info, tr, progress=p, log=log, env=env, rank=vision.ranker(eyes, src, log))]
         elif visual:
             clips = pick_visual_clips(vision.with_extra(cfg, eyes), info, src, vinfo, env, progress=p, log=log)
             clips = vision.rerank(eyes, clips, src, cfg.clips, log)      # a few extra, the best-looking kept

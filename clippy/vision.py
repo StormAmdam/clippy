@@ -232,10 +232,11 @@ def ranker(eyes: Eyes | None, src, log=print):
         for c in cands:
             s, e = float(c["start"]), float(c["end"])
             frames = frames_at(src, [s + (e - s) * f for f in (0.12, 0.38, 0.62, 0.88)])
-            got = eyes.rate(frames, c.get("hook") or "") if frames else None
+            about = c.get("hook") or c.get("label") or ""
+            got = eyes.rate(frames, about) if frames else None
             if got is not None:
                 c["look"], c["look_why"] = got
-                log(f"    looks {got[0]}/10: {(c.get('hook') or '')[:60]} ({got[1]})")
+                log(f"    looks {got[0]}/10: {about[:60]} ({got[1]})")
         said = lambda c: float(c["score"]) if c.get("score") is not None else 50.0
         out = sorted(cands, key=lambda c: -(0.75 * said(c) + 2.5 * (c["look"] if c.get("look") is not None else 5)))
         log(f"  rated how {len(cands)} candidates look; the best are finalized")

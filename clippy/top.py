@@ -152,8 +152,10 @@ Write, in the SAME LANGUAGE as the moments:
 Return JSON."""
 
 
-def pick_top(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m: None, log=print, env=None) -> dict:
-    """The countdown: one clip whose "segments" are the ranked moments, worst first (#n … #1)."""
+def pick_top(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m: None, log=print, env=None,
+             rank=None) -> dict:
+    """The countdown: one clip whose "segments" are the ranked moments, worst first (#n … #1).
+    rank: when the AI can see (vision.ranker), how the best candidates look counts in the order too."""
     from .llm import LLM, ContextTooSmall
     th, n, lim = theme(cfg.top_theme), max(2, min(10, int(cfg.top_count or 3))), _limits(cfg)
     from .picker import focus_of
@@ -225,6 +227,9 @@ def pick_top(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m: 
         scored.append({"a": a, "b": b, "start": sents[a]["s"], "end": sents[b]["e"], "label": str(c.get("label", "")),
                        "why": str(c.get("why", "")), "score": int(c.get("score", 50)) + bonus})
     scored.sort(key=lambda x: -x["score"])
+    if rank is not None and scored:           # a funny moment has to look funny too
+        k = n + 2
+        scored = rank(scored[:k]) + scored[k:]
     best: list[dict] = []
     for apart in (MIN_APART, 0.0):            # moments far apart first; neighbours only if there aren't enough
         for c in scored:
@@ -242,6 +247,8 @@ def pick_top(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m: 
         seg = _finalize(sents, words, c["a"], c["b"], lim, lang)
         seg.update(rank=rank, label=c["label"].strip().strip('"')[:40] or f"Number {rank}", score=c["score"],
                    why=c["why"], text=" ".join(w["w"] for w in words[seg["i0"]: seg["i1"]]))
+        if c.get("look") is not None:
+            seg["look"] = c["look"]
         segs.append(seg)
         log(f"  #{rank} {mmss(seg['start'])}–{mmss(seg['end'])} score {c['score']}: {seg['label']}")
 

@@ -115,3 +115,19 @@ def test_the_countdown_shows_its_title_then_each_rank():
     off = Overlay(Settings(title_seconds=0), words, 18.0, "Top 3", [], [],
                   lambda t: {"caption_y": 1300, "title_y": 220}, ranks=ranks)
     assert len(off.cards) == 3                         # no hook title: straight into #3
+
+
+def test_with_eyes_a_moment_that_looks_dull_drops_out(ai):
+    ai.moments = [m(2, 3, 80, "Talking head"), m(10, 11, 78, "Big fall"), m(20, 21, 90, "Best"),
+                  m(30, 31, 76, "Crazy jump")]
+    looks = {"Talking head": 1, "Big fall": 9, "Best": 8, "Crazy jump": 9}
+
+    def rank(cands):
+        for c in cands:
+            c["look"] = looks[c["label"]]
+        return sorted(cands, key=lambda c: -(0.75 * c["score"] + 2.5 * c["look"]))
+    clip = top.pick_top(Settings(top_theme="funny", top_count=3), {"title": "T"}, transcript(), log=lambda m: None,
+                        rank=rank)
+    labels = [s["label"] for s in clip["segments"]]
+    assert "Talking head" not in labels and labels[-1] == "Best"        # #1 is still the best overall
+    assert all("look" in s for s in clip["segments"])
