@@ -69,7 +69,7 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
                            "If it was uploaded, upload it again.")
     if missing := [t for t in have_tools() if not (t == "yt-dlp" and local)]:
         raise RuntimeError(f"Clippy's video tools ({', '.join(missing)}) aren't set up yet. {install_hint()}")
-    reuse = bool((overrides or {}).get("reuse_picks"))
+    reuse = bool((overrides or {}).get("reuse_picks")) and not cfg.focus   # a new instruction needs new picks
     pr = Progress(on_progress)
     t_start = time.time()
 

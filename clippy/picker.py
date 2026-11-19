@@ -129,6 +129,18 @@ REFINE_SCHEMA = {
 }
 
 
+def focus_of(cfg) -> str:
+    """The creator's instruction for this video, cleaned up for a prompt (one line, no quotes, not too long)."""
+    return re.sub(r"[\s\"“”]+", " ", str(getattr(cfg, "focus", "") or "")).strip()[:200]
+
+
+def _focus_rule(cfg, n) -> str:
+    f = focus_of(cfg)
+    return (f'\nThe creator asked for: "{f}". Only pick clips that are about this. If fewer than {n} parts of the '
+            "video fit, return fewer: never fill up with clips that don't fit. Score how well each one fits AND how "
+            "strong it is as a clip.") if f else ""
+
+
 def _scout_prompt(info, lines, n, cfg, wps):
     by = f' by {info["uploader"]}' if info.get("uploader") else ""
     return f"""Video: "{info.get("title", "")}"{by}
@@ -139,7 +151,7 @@ Transcript. One sentence per line: [sentence_id] start-time text
 
 Find the {n} best clip candidates in this transcript. A clip is a continuous range of sentences from start_id to end_id (inclusive). It must last {cfg.min_seconds}–{cfg.max_seconds} seconds — use the start-times to estimate (speaking pace here is ~{wps:.1f} words/second, so roughly {int(cfg.min_seconds * wps)}–{int(cfg.max_seconds * wps)} words).
 Pick different topics; ranges must not overlap. In "why" explain briefly what the hook and payoff are. In "hook" quote the opening line.
-Score each 1–100 for viral potential. Be critical: 90+ only for truly exceptional moments.
+Score each 1–100 for viral potential. Be critical: 90+ only for truly exceptional moments.{_focus_rule(cfg, n)}
 Return JSON."""
 
 
@@ -153,7 +165,7 @@ def _refine_prompt(ctx_lines, a, b, dur, why, cfg, used_titles):
 Sentences around the candidate (id | start | duration | text):
 {ctx_lines}
 
-Current pick: sentences {a} to {b} ({dur:.0f}s). Reason it was picked: {why}
+Current pick: sentences {a} to {b} ({dur:.0f}s). Reason it was picked: {why}{f"{chr(10)}The creator wants clips about: {focus_of(cfg)}. Keep it about that." if focus_of(cfg) else ""}
 
 Make it the best possible standalone clip of {cfg.min_seconds}–{cfg.max_seconds} seconds:
 1. start_id — the very first words must hook. Drop warm-up, filler, greetings and openers that depend on earlier context. Never start on a sentence whose subject is an unexplained "they/he/she/it/this/that". Start on the strongest line if you can.

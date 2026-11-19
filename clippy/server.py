@@ -122,7 +122,7 @@ def _worker():
 ALLOWED = {"clips", "min_seconds", "max_seconds", "highlight_color", "title_seconds", "remove_silences",
            "split_screen", "punch_in", "reuse_picks", "words_per_caption", "caption_y", "caption_style",
            "caption_scale", "sfx", "sfx_volume", "motion", "teaser", "emojis", "progress_bar", "speech",
-           "format", "top_theme", "top_count", "top_min", "top_max", "preset"}
+           "format", "top_theme", "top_count", "top_min", "top_max", "preset", "focus"}
 
 
 @app.post("/api/jobs")

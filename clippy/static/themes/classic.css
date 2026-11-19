@@ -559,3 +559,8 @@ details.more > div { padding: 0 14px 14px; }
 .presetbar label { font-weight: 700; font-size: 14px; color: var(--dim); }
 .presetbar select.input { width: auto; min-width: 220px; max-width: 100%; }
 .styles.dimmed, .field.dimmed { opacity: .45; }
+
+/* Make Clips: an optional instruction for the AI that picks the moments */
+.focusbar { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; margin-top: 14px; }
+.focusbar > span { font-weight: 700; font-size: 14px; color: var(--dim); white-space: nowrap; }
+@media (max-width: 720px) { .focusbar { grid-template-columns: 1fr; gap: 6px; } }

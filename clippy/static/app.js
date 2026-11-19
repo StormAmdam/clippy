@@ -426,6 +426,7 @@ pages.make = async (el) => {
         <button class="btn primary lg" id="mGo">${icon("sparkles")} Make Clips</button>
         <button type="button" class="btn lg" id="mUp">${icon("upload")} Upload Video</button>
         <input type="file" id="mFile" accept="video/*,.mkv,.mov,.avi,.m4v,.ts" hidden></form>
+      <label class="focusbar"><span>Look for <small class="faint">(optional)</small></span><input class="input" id="mFocus" type="text" maxlength="200" autocomplete="off" placeholder="Like “practical advice about pricing”. Leave empty for the most watchable moments."></label>
       <p class="small faint" style="margin:12px 0 0">It takes a few minutes, and you can leave this page while it works.</p>
       <div class="drophint" aria-hidden="true">${icon("upload")}<b>Drop your video to make clips from it</b></div>
       <div id="mJob" style="margin-top:18px" class="hidden" aria-live="polite"></div>
@@ -475,6 +476,7 @@ pages.make = async (el) => {
     const pr = PRESETS.find((x) => x.id === o.preset);
     return pr && LOOK.some((k) => k in pr.settings && String(pr.settings[k]).toLowerCase() !== String(o[k]).toLowerCase());
   };
+  const focusText = () => ($("#mFocus")?.value || "").replace(/\s+/g, " ").trim();   // this job only, not remembered
   const save = () => {
     store.set("make", o);
     if ($("#mPresetNote")) $("#mPresetNote").textContent = changedFromPreset() ? "Changed from the saved style. Save to keep the changes." : "";
@@ -588,7 +590,7 @@ pages.make = async (el) => {
       done();
       if (status !== 200) { box.classList.add("hidden"); fail(new Error(r.detail || "The upload failed")); return; }
       $("#mUrl").value = "";
-      try { const j = await api.post("/api/jobs", {url: r.path, options: o}); watch(j.id); toast(`Uploaded “${r.title}”: making clips`); } catch (err) { fail(err); }
+      try { const j = await api.post("/api/jobs", {url: r.path, options: {...o, focus: focusText()}}); watch(j.id); toast(`Uploaded “${r.title}”: making clips`); } catch (err) { fail(err); }
     };
     xhr.send(file);
   };
@@ -607,7 +609,7 @@ pages.make = async (el) => {
     const url = $("#mUrl").value.trim();
     if (!url) { $("#mUrl").focus(); return; }
     $("#mGo").disabled = true;
-    try { const r = await api.post("/api/jobs", {url, options: o}); watch(r.id); } catch (err) { $("#mGo").disabled = false; fail(err); }
+    try { const r = await api.post("/api/jobs", {url, options: {...o, focus: focusText()}}); watch(r.id); } catch (err) { $("#mGo").disabled = false; fail(err); }
   };
   const pre = store.get("prefill", null);
   if (pre) { store.set("prefill", null); $("#mUrl").value = pre; $("#mForm").requestSubmit(); return; }

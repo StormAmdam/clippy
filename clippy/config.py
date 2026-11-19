@@ -49,6 +49,7 @@ class Settings:
     top_count: int = 3                   # moments in a countdown
     top_min: int = 5                     # seconds per moment
     top_max: int = 15
+    focus: str = ""                      # one job's instruction for the picker ("practical advice about pricing")
 
     # ── Look
     caption_style: str = "beast"         # beast | hormozi | box | clean

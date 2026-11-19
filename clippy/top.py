@@ -156,6 +156,9 @@ def pick_top(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m: 
     """The countdown: one clip whose "segments" are the ranked moments, worst first (#n … #1)."""
     from .llm import LLM, ContextTooSmall
     th, n, lim = theme(cfg.top_theme), max(2, min(10, int(cfg.top_count or 3))), _limits(cfg)
+    from .picker import focus_of
+    if focus_of(cfg):                                   # the creator's instruction narrows what counts
+        th = {**th, "look_for": f'{th["look_for"]}, and only moments about: {focus_of(cfg)}'}
     words = transcript["words"]
     if not words:
         raise RuntimeError("No speech found in this video, so there's nothing to rank.")
