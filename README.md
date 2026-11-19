@@ -47,6 +47,26 @@ For the funniest, laughter and loud reactions count too. Extensions add more kin
 that other people made, from the community list or a link. Extensions with code stay off until you say you trust
 them. [Make your own](docs/extensions.md).
 
+**Fix an almost-good short without another editor.** Quick Fix (in Review, the Library and Make Clips) shows the short
+beside its source video: move where it starts and ends, tap a misspelled word in the transcript to fix it (it keeps
+its timing), change the title, and only that short is rendered again. Nothing is picked again and the other shorts
+stay as they are.
+
+**Find a Quote.** For the line the AI skipped: open a video in the Library, search what's said, pick the first and
+last line, and Clippy makes it a short with the usual captions and framing.
+
+**Saved styles.** Save a look as a style (clean captions and calm edits for a podcast, bright captions and big effects
+for a gaming channel) and use it in Make Clips, Find a Quote and Autopilot channels.
+
+**Tell the AI what to look for.** An optional line on Make Clips, like "practical advice about pricing", makes it pick
+only moments about that.
+
+**Watch a recording folder.** Point Settings at one folder (OBS's recordings, for example) and every new recording
+that finishes there becomes shorts by itself, with a saved style.
+
+**Review on your phone.** Review → Review on Your Phone shows a QR code. Scan it on the same Wi-Fi to watch, approve
+and save shorts from the couch. The phone gets a separate, limited page: it can't change settings or make clips.
+
 ## Install
 
 ### Windows
@@ -205,7 +225,7 @@ llama.cpp option in setup) avoids all this and uses the same graphics card.
 <summary><b>Command line</b></summary>
 
 ```
-./clippy.sh web                      # the web app (add --host 0.0.0.0 to open it from your phone on the same Wi-Fi)
+./clippy.sh web                      # the web app (Review → Review on Your Phone opens Review on your phone)
 ./clippy.sh "https://youtu.be/…"     # or straight from the terminal
 ./clippy.sh "https://youtu.be/…" -n 8 --max 45
 ./clippy.sh "https://youtu.be/…" --reuse --style box --color "#3DFF7A"   # same picks, new look (skips the AI)
@@ -292,6 +312,8 @@ on your computer. It connects to the internet only for these:
   - browsing and installing extensions (GitHub)
   - uploading shorts to your own YouTube channel after you sign in with Google (the login stays on your PC)
   - an AI app you connect yourself gets the transcript text it picks clips from
+  - Review on your phone opens a page on your own network (not the internet) while it's on, for the phone that
+    scanned its code
 - **By itself:**
   - when it opens, it asks GitHub whether there's a newer version (Settings → Updates turns this off)
   - the Windows app refreshes its YouTube download tool (yt-dlp) from PyPI every few days, because YouTube changes
