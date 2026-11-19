@@ -24,6 +24,10 @@ CTX="${LLAMA_CODER_CTX:-65536}"
 PORT="${LLAMA_CODER_PORT:-8080}"
 LLAMA_DIR="${LLAMA_CPP_DIR:-$HOME/.local/opt/llama.cpp/current}"
 ALIAS="${LLAMA_CODER_ALIAS:-$(basename "$MODEL" .gguf)}"   # the model name Clippy shows
+# The model's vision file (mmproj), when there is one: Clippy then frames and rates clips by looking at frames.
+MMPROJ="${LLAMA_CODER_MMPROJ:-${MODEL%.gguf}.mmproj.gguf}"
+VISION=()
+[ -f "$MMPROJ" ] && VISION=(--mmproj "$MMPROJ")
 
 exec "$LLAMA_DIR/llama-server" \
   --model "$MODEL" \
@@ -38,5 +42,6 @@ exec "$LLAMA_DIR/llama-server" \
   --batch-size 2048 --ubatch-size 2048 \
   --cache-ram 2048 \
   --cors-origins localhost \
+  ${VISION[@]+"${VISION[@]}"} \
   --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 1.5 \
   "$@"

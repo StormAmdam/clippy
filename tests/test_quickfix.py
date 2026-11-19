@@ -46,7 +46,7 @@ def fake_render(monkeypatch):
     """render_clip stand-in: records what it was asked to render and writes the files a render makes."""
     seen = []
 
-    def render(cfg, src, vinfo, clip, words, env, out, progress=None, log=None):
+    def render(cfg, src, vinfo, clip, words, env, out, progress=None, log=None, eyes=None):
         seen.append({"cfg": cfg, "clip": clip, "words": words, "out": out})
         out.write_bytes(b"new render")
         out.with_suffix(".jpg").write_bytes(b"jpg")

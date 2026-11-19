@@ -19,6 +19,7 @@ class Settings:
     llm_model: str = ""            # empty = the loaded model, else the newest download that can chat
     llm_api_key: str = ""
     llm_thinking: bool = False     # let the model "think" first (slower, sometimes smarter)
+    vision: str = "auto"           # auto = when the AI can see images, it checks the framing and how clips look | off
     llm_chunk_chars: int = 60000   # most transcript per request (~20k tokens); less when the server's context is smaller
     llm_context: int = 0           # tokens per request; 0 = ask the server (Ollama: 16384)
     ai_mode: str = "auto"          # auto = built-in AI when a model is downloaded, else another AI app | builtin | external

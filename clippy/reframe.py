@@ -205,7 +205,9 @@ def face_detector(w: int, h: int, score: float = 0.38):
 
 
 def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, split_screen: bool = True,
-            progress=lambda p: None, fps_str: str | None = None, no_captions: bool = False) -> list[Shot]:
+            progress=lambda p: None, fps_str: str | None = None, no_captions: bool = False, eyes=None,
+            log=lambda m: None) -> list[Shot]:
+    """eyes: clippy.vision.Eyes, when the AI can see: it says what matters in each shot (see apply_view)."""
     aw = min(ANALYSIS_W, W)
     ah = even(H * aw / W)
     sx, sy = W / aw, H / ah
@@ -217,7 +219,10 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
     scores, corrs = [0.0], [1.0]
     samples: list[tuple[int, np.ndarray]] = []
     energies: dict[int, np.ndarray] = {}   # per sampled frame: horizontal detail per column (for fit crops)
-    prev_hsv = prev_hist = None
+    motion: dict[int, np.ndarray] = {}     # per sampled frame: how much moved per column (what's happening)
+    thumbs: dict[int, np.ndarray] = {}     # about one frame a second, for the AI to look at
+    every = max(1, round(fps))
+    prev_hsv = prev_hist = prev_g = None
     n = 0
     for i, frame in enumerate(FrameStream(frame_reader(src, start, nframes, fps_str or f"{fps:.6f}", (aw, ah)), aw, ah)):
         n = i + 1
@@ -229,9 +234,16 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
             scores.append(float(np.mean(cv2.absdiff(hsv, prev_hsv))))
             corrs.append(float(cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)))
         prev_hsv, prev_hist = hsv, hist
+        if eyes is not None and i % every == every // 2:
+            thumbs[i] = frame.copy()
         if i % step == 0:
-            gx = cv2.Sobel(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), cv2.CV_32F, 1, 0, ksize=3)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
             energies[i] = cv2.resize(np.abs(gx).mean(axis=0, keepdims=True), (96, 1), interpolation=cv2.INTER_AREA)[0]
+            g = cv2.resize(gray, (96, 54), interpolation=cv2.INTER_AREA).astype(np.float32)
+            if prev_g is not None:
+                motion[i] = np.abs(g - prev_g).mean(axis=0)
+            prev_g = g
             _, faces = det.detect(frame)
             rows = []
             if faces is not None:
@@ -251,6 +263,8 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
     portrait_src = W / H <= 9 / 16 + 0.02
     crop_w_full = min(W, H * 9 / 16)
     shots: list[Shot] = []
+    cols: dict[int, np.ndarray] = {}       # per shot: where the detail and movement are, per column
+    webcams: dict[int, dict] = {}          # per shot: a face that looks like a streamer's webcam
     for a, b in zip(cuts[:-1], cuts[1:]):
         if b <= a:
             continue
@@ -262,6 +276,11 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
         shot_energy = [energies[fi] for fi, _ in sm if fi in energies]
         if shot_energy:
             col = np.mean(shot_energy, axis=0)
+            moved = [motion[fi] for fi, _ in sm if fi in motion]
+            if moved and float(np.mean(moved)) > 1.0:          # moving things count more than still texture
+                mv = np.mean(moved, axis=0)
+                col = col / max(float(col.max()), 1e-6) + 1.5 * mv / max(float(mv.max()), 1e-6)
+            cols[len(shots) - 1] = col
             if no_captions:  # nothing goes under the picture → bigger square window, centred
                 shot.fit_crop = fit_crop_for(col, W, H, aspect=1.0, edge_limit=0.35) or fit_crop_for(col, W, H)
                 shot.fit_mid = True
@@ -281,6 +300,11 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
         if not tracks:
             continue  # no reliable face → full frame over blurred background
         tracks.sort(key=lambda t: -t["weight"])
+        cam = webcam_track(tracks, len(sm), W, H)
+        if cam is not None:                    # a streamer's webcam: it goes on top, the game below (see below)
+            webcams[len(shots) - 1] = cam
+            shot.fit_crop = None
+            continue
         main = tracks[0]
         # two people side by side that can't share one 9:16 crop → split screen
         if split_screen and len(tracks) > 1:
@@ -292,8 +316,193 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
                 continue
         shot.fit_crop = None
         _plan_crop(shot, main, a, b, fps, W, crop_w_full)
+    views = _look(eyes, shots, thumbs, fps, W, H) if eyes is not None and thumbs and not portrait_src else {}
+    changed = 0
+    for k, shot in enumerate(shots):
+        if k in views:
+            changed += bool(apply_view(shot, views[k], W, H, fps, cols.get(k), no_captions))
+        elif k in webcams:                     # no AI eyes: the webcam rule, the action where things move
+            box = webcam_box(webcams[k], W, H)
+            col = cols.get(k)
+            subj = None
+            if col is not None:
+                c = np.array(col, dtype=np.float64)
+                n = len(c)
+                c[int(box[0] / W * n): int(np.ceil(box[2] / W * n))] = 0
+                if c.sum() > 0:
+                    mid = float((np.arange(n) + 0.5) @ c / c.sum()) * W / n
+                    subj = (max(0.0, mid - 0.1 * W), 0.0, min(float(W), mid + 0.1 * W), float(H))
+            plan_stream(shot, box, subj, W, H)
+            changed += 1
+    if views:
+        log(f"    the AI looked at {len(views)} shot{'s' if len(views) != 1 else ''}: {changed} reframed")
+    elif webcams:
+        log(f"    a streamer's webcam in {len(webcams)} shot{'s' if len(webcams) != 1 else ''}: webcam on top")
     progress(1.0)
     return shots
+
+
+def _look(eyes, shots: list[Shot], thumbs: dict[int, np.ndarray], fps: float, W: int, H: int) -> dict[int, dict]:
+    """Ask the AI about each shot: one frame from its middle, two (merged) for longer shots."""
+    from .vision import MAX_IMAGES
+    asks: list[tuple[int, int]] = []           # (shot index, frame index)
+    longest = sorted(range(len(shots)), key=lambda k: -(shots[k].f1 - shots[k].f0))
+    for k in longest:                          # one request per clip: the longest shots matter most
+        shot = shots[k]
+        inside = sorted(fi for fi in thumbs if shot.f0 <= fi < shot.f1)
+        if not inside or len(asks) >= MAX_IMAGES:
+            continue
+        if (shot.f1 - shot.f0) / fps > 8 and len(inside) >= 2 and len(asks) + 2 <= MAX_IMAGES:
+            picks = [inside[len(inside) // 3], inside[(2 * len(inside)) // 3]]
+        else:
+            picks = [inside[len(inside) // 2]]
+        asks += [(k, fi) for fi in dict.fromkeys(picks)]
+    if not asks:
+        return {}
+    asks.sort(key=lambda a: a[1])              # shown in the video's order
+    got = eyes.shots([thumbs[fi] for _, fi in asks])
+    views: dict[int, dict] = {}
+    for (k, _), v in zip(asks, got):
+        if v is None:
+            continue
+        tw, th = v.get("scale") or (W, H)       # the AI saw a small frame: its boxes back to source pixels
+        up = lambda b: None if b is None else (b[0] * W / tw, b[1] * H / th, b[2] * W / tw, b[3] * H / th)
+        views.setdefault(k, []).append({**v, "subject": up(v.get("subject")), "cam": up(v.get("cam"))})
+    return {k: _merge(vs) for k, vs in views.items()}
+
+
+def _merge(vs: list[dict]) -> dict:
+    """Two looks at one shot: the important part has to fit both (union of boxes)."""
+    if len(vs) == 1:
+        return vs[0]
+    subj = [v["subject"] for v in vs if v.get("subject")]
+    cams = [v["cam"] for v in vs if v.get("cam")]
+    kinds = [v["kind"] for v in vs]
+    union = (min(b[0] for b in subj), min(b[1] for b in subj), max(b[2] for b in subj), max(b[3] for b in subj)) if subj else None
+    return {"kind": kinds[len(kinds) // 2] if len(set(kinds)) > 1 else kinds[0], "subject": union,
+            "cam": cams[0] if cams else None, "wide": any(v.get("wide") for v in vs), "scale": vs[0].get("scale")}
+
+
+# ───────────────────────── what's important in a shot (the AI's eyes, or a webcam rule) ─────────────────────────
+
+PANEL_ASPECT = OUT_W / (OUT_H / 2)        # split / stream panels are 1080x960
+
+
+def _inside_aspect(box, aspect: float) -> tuple[float, float, float, float]:
+    """The biggest window of this aspect inside a box, centred: (x0, y0, w, h)."""
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    if w / max(h, 1) > aspect:
+        nw = h * aspect
+        return x0 + (w - nw) / 2, y0, nw, h
+    nh = w / aspect
+    return x0, y0 + (h - nh) / 2, w, nh
+
+
+def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def plan_stream(shot: Shot, cam, subject, W: int, H: int) -> None:
+    """A streamer's webcam on top, the game's action below (like the usual gaming short)."""
+    top = _inside_aspect(cam, PANEL_ASPECT)
+    ph, pw = float(H), float(H) * PANEL_ASPECT
+    if pw > W:
+        pw, ph = float(W), W / PANEL_ASPECT
+    if subject is not None:
+        sx0, _, sx1, _ = subject
+        lo, hi = max(0.0, sx1 - pw), min(W - pw, sx0)           # windows that keep the whole subject
+        if lo > hi:                                            # wider than the window: centre on it
+            lo = hi = float(np.clip((sx0 + sx1) / 2 - pw / 2, 0, W - pw))
+    else:
+        lo, hi = 0.0, W - pw
+    cands = np.linspace(lo, hi, 9) if hi > lo else np.array([lo])
+    cx0, cx1 = cam[0], cam[2]
+    best = min(cands, key=lambda x: (_overlap(x, x + pw, cx0, cx1),
+                                     abs(x + pw / 2 - ((subject[0] + subject[2]) / 2 if subject else W / 2))))
+    y0 = float(np.clip((H - ph) / 2, 0, H - ph))
+    shot.layout, shot.panels, shot.fit_crop = "split", [top, (float(best), y0, pw, ph)], None
+
+
+def apply_view(shot: Shot, view: dict, W: int, H: int, fps: float, col_energy=None, no_captions: bool = False) -> str:
+    """Change a shot's framing so the important thing stays in the picture. Returns what changed ("" = nothing)."""
+    kind, subj, cam, wide = view.get("kind"), view.get("subject"), view.get("cam"), view.get("wide")
+    cw = min(W, H * 9 / 16)
+    n = shot.f1 - shot.f0
+    if kind == "screen":                                       # slides, text, menus: all of it, not a slice
+        if shot.layout != "fit":
+            shot.layout, shot.panels, shot.cx = "fit", [], None
+            shot.fit_crop = fit_crop_for(col_energy, W, H) if col_energy is not None else None
+            return "screen: the whole picture"
+        return ""
+    if kind == "stream" and cam is not None:
+        plan_stream(shot, cam, subj, W, H)
+        return "stream: webcam on top, the action below"
+    if subj is None:
+        return ""
+    sx0, sy0, sx1, sy1 = subj
+    sw, scx = sx1 - sx0, (sx0 + sx1) / 2
+    if shot.layout == "split" and kind != "talking":           # two "faces" that aren't people talking
+        shot.layout, shot.panels = "fit", []
+        shot.fit_crop = None
+    if shot.layout == "crop" and kind == "talking":            # someone talking: the face crop is right; at most
+        cx = shot.cx if shot.cx is not None else np.full(n, W / 2)   # nudge it so the person stays in
+        need = np.clip(cx, scx - cw / 2 + 0.1 * cw, scx + cw / 2 - 0.1 * cw)
+        if np.max(np.abs(need - cx)) < 0.02 * cw:
+            return ""
+        shot.cx = np.clip(_smooth(need, 0.2 * fps), cw / 2, W - cw / 2)
+        return "crop nudged to keep the speaker in"
+    if shot.layout == "crop":
+        if wide or sw > cw * 1.05:                             # it doesn't fit a tall crop: show the whole picture
+            shot.layout, shot.cx = "fit", None
+            tw = H * 4 / 3
+            shot.fit_crop = (round(float(np.clip(scx - tw / 2, 0, W - tw)), 1), round(tw, 1)) if sw <= tw * 0.95 and W > tw * 1.05 else None
+            return "crop → whole picture (the important part is too wide for a tall crop)"
+        cx = shot.cx if shot.cx is not None else np.full(n, W / 2)
+        need = np.clip(cx, sx1 - cw / 2 + 0.03 * cw, sx0 + cw / 2 - 0.03 * cw)   # keep the subject inside
+        if np.max(np.abs(need - cx)) < 0.02 * cw:
+            return ""
+        shot.cx = np.clip(_smooth(need, 0.2 * fps), cw / 2, W - cw / 2)
+        return "crop moved to keep the important part in"
+    if shot.layout == "fit":
+        if kind in ("scene", "talking") and not wide and sw <= 0.85 * cw and sy1 - sy0 >= 0.28 * H and not no_captions:
+            shot.layout = "crop"                               # one clear subject: big and tall, not letterboxed
+            shot.cx = np.full(n, float(np.clip(scx, cw / 2, W - cw / 2)))
+            shot.cy, shot.fw, shot.fit_crop = (sy0 + sy1) / 2, 0.0, None
+            return "whole picture → following the subject"
+        tw = shot.fit_crop[1] if shot.fit_crop else H * 4 / 3
+        if wide or sw > tw * 0.95 or W <= tw * 1.05:
+            changed = shot.fit_crop is not None
+            shot.fit_crop = None
+            return "whole picture (the important part is wide)" if changed else ""
+        x0 = round(float(np.clip(scx - tw / 2, 0, W - tw)), 1)
+        old = shot.fit_crop
+        shot.fit_crop = (x0, round(tw, 1))
+        return "" if old and abs(old[0] - x0) < 0.03 * W else "window moved to the important part"
+    return ""
+
+
+def webcam_track(tracks: list[dict], n_samples: int, W: int, H: int) -> dict | None:
+    """A face that sits small and still in a corner the whole shot is a streamer's webcam, not someone to follow."""
+    for t in tracks:
+        p = np.array(t["pts"])
+        if len(p) < max(3, 0.6 * n_samples):
+            continue
+        corner_x = t["cx"] < 0.30 * W or t["cx"] > 0.70 * W
+        corner_y = t["cy"] < 0.33 * H or t["cy"] > 0.67 * H
+        steady = float(np.std(p[:, 1])) < 0.025 * W and float(np.std(p[:, 2])) < 0.03 * H
+        if corner_x and corner_y and t["fh"] < 0.2 * H and steady:
+            return t
+    return None
+
+
+def webcam_box(t: dict, W: int, H: int) -> tuple[float, float, float, float]:
+    """Where the webcam overlay probably is: a 16:9-ish box around the face, kept inside the frame."""
+    fh = t["fh"]
+    bw, bh = fh * 3.6, fh * 2.4
+    x0 = float(np.clip(t["cx"] - bw / 2, 0, W - bw))
+    y0 = float(np.clip(t["cy"] - bh * 0.45, 0, H - bh))
+    return x0, y0, x0 + bw, y0 + bh
 
 
 # ───────────────────────── compositing ─────────────────────────

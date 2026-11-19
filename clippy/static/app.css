@@ -397,8 +397,8 @@ a.rowi:hover .t > b { color: var(--yellow); }
 .clip h3 { margin: 0; font-family: var(--display); font-size: 21px; font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
 .clip .cap { background: var(--well); border: 2px solid var(--line); border-radius: var(--ctl); padding: 10px; font-size: 13.5px; color: #dde1ea; white-space: pre-wrap;
              max-height: 120px; overflow: auto; }
-.clip .acts { display: flex; gap: 8px; margin-top: auto; }
-.clip .acts > * { flex: 1; }
+.clip .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.clip .acts > * { flex: 1 1 calc(50% - 4px); min-width: 0; }   /* two per row: Download, Quick Fix, then Copy Caption */
 .score { display: inline-grid; place-items: center; min-width: 34px; height: 24px; padding: 0 7px; border-radius: 8px; font-weight: 700; font-size: 13px;
          background: var(--bay3); color: var(--ink); font-variant-numeric: tabular-nums; }
 .score.hi { background: var(--yellow); color: var(--yellow-ink); border: 2px solid var(--edge); }

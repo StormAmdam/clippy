@@ -22,13 +22,20 @@ ABOUT = {
 }
 CATALOG = [{"id": m["file"].removesuffix(".gguf"), "name": ABOUT[m["size"]][0], "about": ABOUT[m["size"]][1],
             "file": m["file"], "url": f"https://huggingface.co/{m['repo']}/resolve/main/{m['file']}",
-            "page": f"https://huggingface.co/{m['repo']}", "gb": m["gb"], "fits": m["fits"]} for m in aisetup.GGUF_MODELS]
+            "page": f"https://huggingface.co/{m['repo']}", "gb": m["gb"], "fits": m["fits"],
+            "mmproj_url": f"https://huggingface.co/{m['repo']}/resolve/main/{m['mmproj']}" if m.get("mmproj") else "",
+            "mmproj_gb": m.get("mmproj_gb", 0)} for m in aisetup.GGUF_MODELS]
 CONTEXT = 32768
 
 
 def _files() -> list[Path]:
     d = components.LLM_DIR
     return sorted(p for p in d.glob("*.gguf") if "mmproj" not in p.name.lower()) if d.exists() else []
+
+
+def vision_file(model: Path) -> Path:
+    """A model's vision file (mmproj), kept next to it: Qwen3.5-4B-Q4_K_M.gguf → Qwen3.5-4B-Q4_K_M.mmproj.gguf."""
+    return model.with_name(model.stem + ".mmproj.gguf")
 
 
 def model_path(cfg) -> Path | None:
@@ -63,9 +70,14 @@ def models(cfg) -> list[dict]:
     for m in CATALOG:
         p = components.LLM_DIR / m["file"]
         t = components.TASKS.get("model:" + m["id"])
+        vt = components.TASKS.get("vision:" + m["id"])
+        if not (t and t.state != "done") and vt and vt.state != "done":
+            t = vt                                       # adding vision shows on the model's row
+        vision = "ready" if vision_file(p).exists() else "missing" if m["mmproj_url"] and p.exists() else "none"
         rows.append({k: v for k, v in m.items() if k != "fits"} | {
             "installed": p.exists(), "active": active == p and builtin, "fits": m["fits"](hw["vram_mb"], hw["ram_mb"]),
-            "recommended": m["id"] == recommended(hw), "task": t.to_dict() if t and t.state != "done" else None})
+            "recommended": m["id"] == recommended(hw), "task": t.to_dict() if t and t.state != "done" else None,
+            "vision": vision})
     known = {m["file"] for m in CATALOG}
     for p in _files():                                  # models added from a link
         if p.name not in known:
@@ -105,6 +117,10 @@ def install_model(mid: str = "", url: str = "") -> components.Task:
         if size and size + 2e9 > free:
             raise RuntimeError(f"Not enough free disk space: {aisetup.human(size)} needed plus 2 GB to spare.")
         components.fetch(link, components.LLM_DIR / name, t, label)
+        if m_url := (m.get("mmproj_url") if not url else ""):
+            if str(config.load().vision).lower() != "off":   # its eyes: framing and rating clips by looking
+                t.label, t.done, t.total = f"Vision for {label}", 0, 0
+                components.fetch(m_url, vision_file(components.LLM_DIR / name), t, f"Vision for {label}")
         if not components.engine_exe():                  # a model is no use without the engine that runs it
             t.label, t.done, t.total = "AI engine", 0, 0
             components.PARTS["engine"][3](t, config.load())
@@ -112,11 +128,26 @@ def install_model(mid: str = "", url: str = "") -> components.Task:
     return components.run_task(tid, label, go)
 
 
+def install_vision(mid: str) -> components.Task:
+    """Add the vision file to a catalog model that's already downloaded."""
+    m = next((m for m in CATALOG if m["id"] == mid and m["mmproj_url"]), None)
+    if not m:
+        raise KeyError(mid)
+
+    def go(t: components.Task):
+        components.fetch(m["mmproj_url"], vision_file(components.LLM_DIR / m["file"]), t, f"Vision for {m['name']}")
+        if ENGINE.model == components.LLM_DIR / m["file"]:
+            ENGINE.stop()                                 # loads again with its eyes next time
+
+    return components.run_task("vision:" + mid, f"Vision for {m['name']}", go)
+
+
 def remove_model(file: str) -> None:
     p = components.LLM_DIR / Path(file).name
     if ENGINE.model == p:
         ENGINE.stop()
     p.unlink(missing_ok=True)
+    vision_file(p).unlink(missing_ok=True)
     (components.DOWNLOADS / (p.name + ".part")).unlink(missing_ok=True)
 
 
@@ -132,6 +163,7 @@ class Engine:
     def __init__(self):
         self.proc: subprocess.Popen | None = None
         self.model: Path | None = None
+        self.vision = False
         self.port = 0
         self.context = 0
         self.last_used = 0.0
@@ -148,7 +180,8 @@ class Engine:
 
     def start(self, cfg, model: Path) -> None:
         with self.lock:
-            if self.running() and self.model == model:
+            see = vision_file(model).exists() and str(getattr(cfg, "vision", "auto")).lower() != "off"
+            if self.running() and self.model == model and self.vision == see:
                 self.touch()
                 return
             self.stop()
@@ -169,12 +202,14 @@ class Engine:
             args = [str(exe), "-m", model.name, "--alias", model.stem, "--host", "127.0.0.1", "--port", str(port),
                     "-c", str(cfg.ai_context or CONTEXT), "--parallel", "1", "--threads", str(hw["threads"]),
                     "--fit", "on", "--fit-target", "4500" if hw["vram_mb"] >= 10 * 1024 else "1024"]
+            if see:                                      # its eyes (clippy/vision.py), by name from the same folder
+                args += ["--mmproj", vision_file(model).name]
             # Windows: tied to Clippy (clippy/quiet.py), so it ends when Clippy does, even if Clippy crashes
             extra = {"start_new_session": True} if sys.platform != "win32" else components.hidden()
             with open(log_file, "ab") as log:
                 self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                              cwd=model.parent, **extra)
-            self.model, self.port = model, port
+            self.model, self.port, self.vision = model, port, see
             t0 = time.time()
             while time.time() - t0 < 600:               # a big model can take a while to load from disk
                 if self.proc.poll() is not None:

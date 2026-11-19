@@ -105,6 +105,8 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
         n, cover, _ = speech_stats(tr)
         log(f"  no real talking found ({n} words, {cover:.0%} speech) → picking clips from sound, action and replays")
 
+    from . import vision
+    eyes = vision.eyes_for(cfg, log)                    # None unless the AI can see (and it's allowed)
     p = pr.stage("pick")
     countdown = cfg.format == "top"
     picks_file = workdir / ("picks-top.json" if countdown else "picks.json")
@@ -122,9 +124,11 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
             else:
                 clips = [top.pick_top(cfg, info, tr, progress=p, log=log, env=env)]
         elif visual:
-            clips = pick_visual_clips(cfg, info, src, vinfo, env, progress=p, log=log)
+            clips = pick_visual_clips(vision.with_extra(cfg, eyes), info, src, vinfo, env, progress=p, log=log)
+            clips = vision.rerank(eyes, clips, src, cfg.clips, log)      # a few extra, the best-looking kept
         else:
-            clips = pick_clips(cfg, info, tr, progress=p, log=log, env=env)
+            clips = pick_clips(vision.with_extra(cfg, eyes), info, tr, progress=p, log=log, env=env)
+            clips = vision.rerank(eyes, clips, src, cfg.clips, log)
         config.write_atomic(picks_file, json.dumps(clips, ensure_ascii=False, indent=2))
 
     rcfg = render_settings(cfg, visual, countdown)
@@ -149,12 +153,13 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
         out = out_dir / name
         log(f"  rendering {name}")
         sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
-        stats = render_clip(rcfg, src, vinfo, clip, words, env, out, progress=sub, log=log)
+        stats = render_clip(rcfg, src, vinfo, clip, words, env, out, progress=sub, log=log, eyes=eyes)
         config.write_atomic(sidecar(out), json.dumps({"pick": clip, "overrides": made_with, "visual": visual,
                                                       "countdown": countdown}, ensure_ascii=False))
         extra = {"format": "top", "ranks": [{"rank": s["rank"], "label": s["label"], "start": s["start"],
                                             "end": s["end"]} for s in clip["segments"]]} if clip.get("segments") else {}
-        results.append({**{k: clip.get(k) for k in ("title", "caption", "hashtags", "score", "why", "start", "end")},
+        results.append({**{k: clip.get(k) for k in ("title", "caption", "hashtags", "score", "why", "start", "end",
+                                                     "look", "look_why")},
                         **stats, **extra, "file": str(out.relative_to(config.output_root(cfg))),
                         "thumb": str(out.with_suffix(".jpg").relative_to(config.output_root(cfg)))})
         extensions.run_hook("clip_rendered", log=log, path=out, clip=dict(results[-1]), video=dict(info))

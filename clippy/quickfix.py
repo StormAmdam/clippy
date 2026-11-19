@@ -253,8 +253,10 @@ def apply(file: str, start: float | None = None, end: float | None = None, words
     env = np.load(env_file) if env_file.exists() else None
     new = _next_name(d["out"])
     log(f"  rendering {new.name} ({', '.join(changed)} changed)")
+    from . import vision
     stats = render_clip(rcfg, src, vinfo, pick, [] if d["visual"] else words_all, env, new,
-                        progress=lambda p, m="": progress(base + (1 - base) * p, m), log=log)
+                        progress=lambda p, m="": progress(base + (1 - base) * p, m), log=log,
+                        eyes=vision.eyes_for(cfg, log))
     edits = {**d["edits"], "words": fixed}
     config.write_atomic(sidecar(new), json.dumps({"pick": pick, "overrides": d["overrides"], "visual": d["visual"],
                                                   "countdown": d["countdown"], "edits": edits}, ensure_ascii=False))
@@ -365,8 +367,10 @@ def make_clip(video: str, i0: int, i1: int, title: str = "", overrides: dict | N
     rcfg = render_settings(cfg, False, False)
     env_file = d / "envelope.npy"
     log(f"  rendering {out.name} from the transcript ({span['end'] - span['start']:.1f} s)")
+    from . import vision
     stats = render_clip(rcfg, src, video_stream_info(src), pick, words, np.load(env_file) if env_file.exists() else None,
-                        out, progress=lambda p, m="": progress(base + (1 - base) * p, m), log=log)
+                        out, progress=lambda p, m="": progress(base + (1 - base) * p, m), log=log,
+                        eyes=vision.eyes_for(cfg, log))
     config.write_atomic(sidecar(out), json.dumps({"pick": pick, "overrides": made_with, "visual": False,
                                                   "countdown": False}, ensure_ascii=False))
     root = _root().resolve()

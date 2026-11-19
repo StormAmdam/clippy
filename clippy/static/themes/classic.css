@@ -346,8 +346,8 @@ a.rowi:hover .t > b { color: var(--yellow); }
 .clip .b { padding: 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
 .clip h3 { margin: 0; font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
 .clip .cap { background: var(--bay2); border-radius: var(--ctl); padding: 10px; font-size: 13.5px; color: #dadade; white-space: pre-wrap; max-height: 120px; overflow: auto; }
-.clip .acts { display: flex; gap: 8px; margin-top: auto; }
-.clip .acts > * { flex: 1; }
+.clip .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.clip .acts > * { flex: 1 1 calc(50% - 4px); min-width: 0; }   /* two per row: Download, Quick Fix, then Copy Caption */
 .score { display: inline-grid; place-items: center; min-width: 32px; height: 23px; padding: 0 7px; border-radius: 7px; font-weight: 700; font-size: 13px;
          background: var(--bay3); color: var(--ink); font-variant-numeric: tabular-nums; }
 .score.hi { background: var(--yellow); color: var(--yellow-ink); }

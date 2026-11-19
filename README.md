@@ -47,6 +47,12 @@ For the funniest, laughter and loud reactions count too. Extensions add more kin
 that other people made, from the community list or a link. Extensions with code stay off until you say you trust
 them. [Make your own](docs/extensions.md).
 
+**The AI looks at the video.** With a model that can see images (press **Add Vision** in AI & Tools, or a vision model
+in Ollama or llama.cpp), the AI checks every shot so the important thing stays in the picture: a streamer's webcam
+goes on top with the game's action below, a crop that would miss the action moves or shows the whole picture, and an
+animal or object gets followed instead of a stray face. It also looks at a few frames of each candidate and keeps the
+clips that look best on a phone. Without one, streams still get the webcam-on-top layout.
+
 **Fix an almost-good short without another editor.** Quick Fix (in Review, the Library and Make Clips) shows the short
 beside its source video: move where it starts and ends, tap a misspelled word in the transcript to fix it (it keeps
 its timing), change the title, and only that short is rendered again. Nothing is picked again and the other shorts

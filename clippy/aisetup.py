@@ -32,11 +32,15 @@ OLLAMA_MODELS = [(22 * GIB, "qwen3.6:35b-a3b", 22.6), (7 * GIB, "qwen3.5:9b", 6.
 # GGUF files for llama.cpp, biggest first. The 35B model is a mixture of experts (3B active): its experts can sit in
 # system RAM while attention runs on the GPU, so it needs RAM more than VRAM.
 GGUF_MODELS = [
+    # mmproj: the model's vision file (clippy/vision.py: framing and rating clips by looking at frames)
     {"size": "big", "repo": "unsloth/Qwen3.6-35B-A3B-GGUF", "file": "Qwen3.6-35B-A3B-UD-IQ4_XS.gguf", "gb": 17.7,
+     "mmproj": "mmproj-F16.gguf", "mmproj_gb": 0.9,
      "fits": lambda vram, ram: (ram >= 22 * GIB and vram >= 6 * GIB) or ram >= 28 * GIB},
     {"size": "medium", "repo": "unsloth/Qwen3.5-9B-GGUF", "file": "Qwen3.5-9B-Q4_K_M.gguf", "gb": 5.7,
+     "mmproj": "mmproj-F16.gguf", "mmproj_gb": 0.9,
      "fits": lambda vram, ram: ram >= 12 * GIB or vram >= 7 * GIB},
     {"size": "small", "repo": "unsloth/Qwen3.5-4B-GGUF", "file": "Qwen3.5-4B-Q4_K_M.gguf", "gb": 2.7,
+     "mmproj": "mmproj-F16.gguf", "mmproj_gb": 0.7,
      "fits": lambda vram, ram: True},
 ]
 MODELS_DIR = Path.home() / "models"
@@ -185,14 +189,14 @@ def llama_assets(names: list[str], nvidia: bool, arch: str, vulkan: bool, system
     return [cpu] if cpu else []
 
 
-def write_env(path: Path, model: str, vram_mb: int, threads: int, ctx: int = 32768) -> Path:
+def write_env(path: Path, model: str, vram_mb: int, threads: int, ctx: int = 32768, mmproj: str = "") -> Path:
     """Settings for tools/ai-server/llama-coder. On a 10 GB+ card it leaves room for Whisper next to it;
     on smaller ones it takes more of the GPU and Clippy pauses it while transcribing."""
     free = 4500 if vram_mb >= 10 * GIB else 1024
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"# Written by Clippy's setup. Change it, then: systemctl --user restart llama-coder\n"
                     f'LLAMA_CODER_MODEL="{model}"\nLLAMA_CODER_FREE_MB={free}\nLLAMA_CODER_THREADS={threads}\n'
-                    f"LLAMA_CODER_CTX={ctx}\n")
+                    f"LLAMA_CODER_CTX={ctx}\n" + (f'LLAMA_CODER_MMPROJ="{mmproj}"\n' if mmproj else ""))
     return path
 
 
@@ -338,7 +342,15 @@ def setup_llamacpp(size: str = "auto") -> int:
     install_llamacpp(hw)
     path = download(f"https://huggingface.co/{model['repo']}/resolve/main/{model['file']}", MODELS_DIR / model["file"],
                     f"model {model['file']}")
-    write_env(ENV_FILE, str(path), hw["vram_mb"], hw["threads"])
+    mmproj = ""
+    if model.get("mmproj"):                          # its eyes: Clippy frames and rates clips by looking at frames
+        try:
+            mm = download(f"https://huggingface.co/{model['repo']}/resolve/main/{model['mmproj']}",
+                          MODELS_DIR / (Path(model["file"]).stem + ".mmproj.gguf"), "its vision file")
+            mmproj = str(mm)
+        except Exception as e:                       # clips still work without it
+            print(f"  ! Couldn't download the vision file ({e}); clips are picked without it", flush=True)
+    write_env(ENV_FILE, str(path), hw["vram_mb"], hw["threads"], mmproj=mmproj)
     how = install_service()
     if how == "service":
         print("  ✓ llama-coder runs as a background service and starts at login", flush=True)

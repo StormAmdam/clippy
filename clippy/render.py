@@ -224,11 +224,12 @@ def _encoder_args(cfg: Settings, nvenc: bool) -> list[str]:
 # ───────────────────────── main entry ─────────────────────────
 
 def render_clip(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[dict], env: np.ndarray | None,
-                out_path: Path, progress=lambda p, m: None, log=print) -> dict:
-    """Render one clip. On any failure or cancel, leaves no partial video, thumbnail or temp folder behind."""
+                out_path: Path, progress=lambda p, m: None, log=print, eyes=None) -> dict:
+    """Render one clip. On any failure or cancel, leaves no partial video, thumbnail or temp folder behind.
+    eyes: clippy.vision.Eyes when the AI can see, so the framing keeps what matters in the picture."""
     tmp = Path(tempfile.mkdtemp(prefix="clippy-", dir=out_path.parent))
     try:
-        return _render(cfg, src, vinfo, clip, words_all, env, out_path, tmp, progress, log)
+        return _render(cfg, src, vinfo, clip, words_all, env, out_path, tmp, progress, log, eyes)
     except BaseException:
         for f in (out_path, out_path.with_suffix(".jpg")):
             f.unlink(missing_ok=True)
@@ -238,7 +239,7 @@ def render_clip(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: li
 
 
 def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[dict], env: np.ndarray | None,
-            out_path: Path, tmp: Path, progress, log) -> dict:
+            out_path: Path, tmp: Path, progress, log, eyes=None) -> dict:
     fps, fps_str = vinfo["fps"], vinfo.get("fps_str") or f'{vinfo["fps"]:.6f}'
     W, H = vinfo["width"], vinfo["height"]
     srcs = str(src)
@@ -259,7 +260,8 @@ def _render(cfg: Settings, src: Path, vinfo: dict, clip: dict, words_all: list[d
         n = int(round((e - s) * fps))
         lo, hi = k / len(specs), (k + 1) / len(specs)
         shots = analyze(srcs, s, n, fps, W, H, cfg.split_screen, fps_str=fps_str, no_captions=not words_all,
-                        progress=lambda p, lo=lo, hi=hi: progress(0.2 * (lo + (hi - lo) * p), "Finding faces & camera cuts…"))
+                        progress=lambda p, lo=lo, hi=hi: progress(0.2 * (lo + (hi - lo) * p), "Finding faces & camera cuts…"),
+                        eyes=eyes, log=log)
         n = shots[-1].f1
         keeps = keep_intervals(words, s, n / fps, fps, env, cfg) if kind != "teaser" else [(0, n)]
         parts.append(Part(kind, s, words, shots, keeps, n))

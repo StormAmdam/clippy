@@ -1495,10 +1495,11 @@ pages.ai = async (el) => {
     $("#aiList").innerHTML = s.models.map((m) => {
       const t = m.task, busy = t && t.state === "running";
       const tags = [m.active ? `<span class="tag ok">${icon("check")} In use</span>` : "", m.recommended && !m.installed ? `<span class="tag your">Best fit for this PC</span>` : "",
-        !m.fits ? `<span class="tag">Too big for this PC</span>` : ""].join("");
+        !m.fits ? `<span class="tag">Too big for this PC</span>` : "",
+        m.vision === "ready" ? `<span class="tag" title="It can look at the video: it checks the framing and how each clip looks">${icon("zoom")} Sees images</span>` : ""].join("");
       const act = busy ? `<button type="button" class="btn sm quiet" data-cancel="${esc(t.id)}">${icon("x")} Cancel</button>`
         : !m.installed ? `<button type="button" class="btn sm ${m.recommended ? "primary" : ""}" data-get="${esc(m.id)}">${icon("download")} Download</button>`
-        : `${m.active ? "" : `<button type="button" class="btn sm" data-use="${esc(m.file)}">Use</button>`}<button type="button" class="btn sm quiet" data-del="${esc(m.file)}" aria-label="Delete ${esc(m.name)}">${icon("trash")}</button>`;
+        : `${m.vision === "missing" ? `<button type="button" class="btn sm" data-vision="${esc(m.id)}" title="Lets it look at the video, so it keeps what matters in the picture and rates how each clip looks">${icon("zoom")} Add Vision <span class="num faint">${m.mmproj_gb} GB</span></button>` : ""}${m.active ? "" : `<button type="button" class="btn sm" data-use="${esc(m.file)}">Use</button>`}<button type="button" class="btn sm quiet" data-del="${esc(m.file)}" aria-label="Delete ${esc(m.name)}">${icon("trash")}</button>`;
       return `<div class="rowi model ${m.active ? "on" : ""}"><div class="t"><b>${esc(m.name)} ${tags}</b><small>${esc(m.about)} <span class="num">${m.gb} GB</span>${m.page ? ` <a href="${esc(m.page)}" target="_blank" rel="noopener">Model page</a>` : ""}</small>${progress(t)}${failed(t)}</div><div class="acts">${act}</div></div>`;
     }).join("");
     $("#aiParts").innerHTML = s.components.map((c) => {
@@ -1521,6 +1522,7 @@ pages.ai = async (el) => {
     if (b.id === "aiAll") return act(() => api.post("/api/setup/install", {id: "everything"}), "Setting up. You can keep using Clippy meanwhile.");
     if (b.dataset.v && b.closest("#aiMode")) return act(() => api.post("/api/setup/mode", {mode: b.dataset.v}));
     if (b.dataset.get) return act(() => api.post("/api/setup/install", {id: "model:" + b.dataset.get}));
+    if (b.dataset.vision) return act(() => api.post("/api/setup/install", {id: "vision:" + b.dataset.vision}), "Downloading its vision. It's used from the next video on.");
     if (b.dataset.part) return act(() => api.post("/api/setup/install", {id: b.dataset.part}));
     if (b.dataset.cancel) return act(() => api.post("/api/setup/cancel", {id: b.dataset.cancel}), "Stopped. It continues where it left off next time.");
     if (b.dataset.use) return act(() => api.post("/api/setup/use", {file: b.dataset.use}), "Clippy will use this model from the next video on");
@@ -1661,7 +1663,9 @@ pages.settings = async (el) => {
           <label class="field"><span>Server address (auto finds one by itself)</span><input class="input" data-k="llm_url" autocomplete="off" spellcheck="false" value="${esc(s.llm_url)}" placeholder="auto"></label>
           <label class="field"><span>Model (empty: the one already loaded, or your newest download)</span><input class="input" data-k="llm_model" list="aiModels" autocomplete="off" spellcheck="false" value="${esc(s.llm_model)}" placeholder="qwen3.5:9b…"><datalist id="aiModels"></datalist></label>
           <label class="field"><span>API key (only for cloud services like Groq or Gemini)</span><input class="input" type="password" id="apiKey" autocomplete="off" placeholder="${s.has_llm_api_key ? "Saved. Type a new key to replace it…" : "gsk_…"}"></label>
-          <label class="switch"><span class="ic">${icon("sparkles")}</span><span class="txt"><b>Let the AI think first</b><small>Slower, sometimes smarter picks</small></span><input type="checkbox" data-k="llm_thinking" ${s.llm_thinking ? "checked" : ""}></label></div></div>
+          <label class="switch"><span class="ic">${icon("sparkles")}</span><span class="txt"><b>Let the AI think first</b><small>Slower, sometimes smarter picks</small></span><input type="checkbox" data-k="llm_thinking" ${s.llm_thinking ? "checked" : ""}></label>
+          <label class="field"><span>Let the AI look at the video</span>${sel("vision", s.vision || "auto", [["auto", "When it can see images (keeps what matters in the picture, rates how clips look)"], ["off", "Off"]])}
+            <small class="hint">It needs a vision model: Add Vision in AI &amp; Tools, or a model in Ollama or llama.cpp that sees images. It makes each video take a little longer.</small></label></div></div>
       <div class="set"><div><b>Graphics card</b><p>Whisper needs about 2.6 GB of graphics memory. When the AI is holding it, Clippy pauses its built-in AI${win ? "" : " or the AI service named below"}, or asks Ollama to unload its model, and gives the memory back afterwards.</p></div>
         <div class="stack"><label class="switch"><span class="ic">${icon("zap")}</span><span class="txt"><b>Free the GPU for transcribing</b><small>About 10× faster transcription. Off means transcribing on the CPU when memory is short.</small></span><input type="checkbox" data-k="free_gpu_for_whisper" ${s.free_gpu_for_whisper ? "checked" : ""}></label>
           ${win ? "" : `<label class="field"><span>AI service name (systemd user service)</span><input class="input" data-k="llama_service" autocomplete="off" spellcheck="false" value="${esc(s.llama_service)}" placeholder="llama-coder…"></label>`}

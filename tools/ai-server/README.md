@@ -8,7 +8,12 @@ llama.cpp (CUDA, Vulkan or CPU), picks a model that fits your graphics memory, R
 `~/.config/llama-coder.env`, and starts the service. The steps below are for doing it by hand.
 
 The launcher reads `~/.config/llama-coder.env` (`LLAMA_CODER_MODEL`, `LLAMA_CODER_FREE_MB`, `LLAMA_CODER_THREADS`,
-`LLAMA_CODER_CTX`); change it and run `systemctl --user restart llama-coder`.
+`LLAMA_CODER_CTX`, `LLAMA_CODER_MMPROJ`); change it and run `systemctl --user restart llama-coder`.
+
+**Vision:** put the model's vision file (its `mmproj` GGUF) next to the model as `<model name>.mmproj.gguf`, or point
+`LLAMA_CODER_MMPROJ` at it, and the launcher loads it. Clippy then lets the AI look at the video to frame shots and
+rate clips. For Qwen3.6-35B-A3B (also its fine-tunes) that's
+[`mmproj-F16.gguf`](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/blob/main/mmproj-F16.gguf) (0.9 GB).
 
 ## Setup by hand on Linux with an NVIDIA GPU (no compiling)
 

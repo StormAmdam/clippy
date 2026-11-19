@@ -479,6 +479,8 @@ def setup_install(body: SetupIn):
             t = engine.setup_everything(cfg)
         elif body.id.startswith("model:"):
             t = engine.install_model(body.id[6:])
+        elif body.id.startswith("vision:"):
+            t = engine.install_vision(body.id[7:])
         else:
             t = components.install(body.id, cfg)
     except ValueError as e:

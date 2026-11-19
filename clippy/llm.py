@@ -5,6 +5,7 @@ machine or, inside WSL, on the Windows side. `llm_url = "auto"` (the default) fi
 """
 from __future__ import annotations
 
+import base64
 import concurrent.futures as cf
 import ipaddress
 import json
@@ -326,6 +327,7 @@ class LLM:
         self._schema_ok = True
         self._kwargs_ok = True
         self._think: bool | None = None      # Ollama: True when the model can "think" (so it must be told not to)
+        self._vision: bool | None = None     # can the model see images (clippy/vision.py); None = not asked yet
 
     @property
     def kind(self) -> str:
@@ -363,6 +365,7 @@ class LLM:
             want = self.cfg.llm_context or OLLAMA_CONTEXT
             self.context = min(want, int(top)) if top else want
             self._think = "thinking" in (info.get("capabilities") or [])
+            self._vision = "vision" in (info.get("capabilities") or [])
         else:
             self.context = self.cfg.llm_context or s.context
             if s.kind == "LM Studio" and 0 < s.context < 12000:
@@ -383,7 +386,25 @@ class LLM:
             return cap
         return max(3000, min(cap, int((self.context - out_tokens - PROMPT_TOKENS) * CHARS_PER_TOKEN)))
 
-    def json(self, system: str, user: str, schema: dict, max_tokens: int = 3000, temperature: float = 0.4) -> dict:
+    def can_see(self) -> bool:
+        """Whether the model takes images: llama.cpp (and the built-in AI) say so in /props once it has its mmproj,
+        Ollama in the model's capabilities. Other servers: no (Clippy doesn't guess)."""
+        if self._vision is None:
+            if self.server is None:
+                self.wait_ready(timeout=30)
+            if self._vision is None:
+                self._vision = False
+                if self.kind in ("llama.cpp", "Built-in AI"):
+                    try:
+                        r = httpx.get(self.server.root + "/props", headers=self.headers, timeout=5)
+                        self._vision = bool(((r.json() or {}).get("modalities") or {}).get("vision"))
+                    except (httpx.HTTPError, ValueError, AttributeError):
+                        pass
+        return bool(self._vision)
+
+    def json(self, system: str, user: str, schema: dict, max_tokens: int = 3000, temperature: float = 0.4,
+             images: list[bytes] | None = None) -> dict:
+        """images: JPEGs to show the model with the prompt (only for a model that can_see())."""
         if self.server is None:
             self.wait_ready(timeout=30)
         if self.kind == "Built-in AI":
@@ -392,9 +413,14 @@ class LLM:
                 self._use(resolve(self.cfg, start=True))
             engine.ENGINE.touch()
         if self.kind == "Ollama":
-            return self._ollama_json(system, user, schema, max_tokens, temperature)
+            return self._ollama_json(system, user, schema, max_tokens, temperature, images)
+        content: str | list = user
+        if images:
+            content = [{"type": "text", "text": user}] + [
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(j).decode()}}
+                for j in images]
         body: dict = {"model": self.model or "default", "temperature": temperature, "max_tokens": max_tokens,
-                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]}
         for attempt in range(3):
             b = dict(body)
             if self._schema_ok:
@@ -436,10 +462,14 @@ class LLM:
                     raise RuntimeError(f"AI returned invalid JSON: {content[:300]}")
         raise RuntimeError("AI request failed after retries")
 
-    def _ollama_json(self, system: str, user: str, schema: dict, max_tokens: int, temperature: float) -> dict:
+    def _ollama_json(self, system: str, user: str, schema: dict, max_tokens: int, temperature: float,
+                     images: list[bytes] | None = None) -> dict:
         """Ollama's own API: the only way to give it a big enough context (its OpenAI endpoint silently cuts prompts)."""
+        msg: dict = {"role": "user", "content": user}
+        if images:
+            msg["images"] = [base64.b64encode(j).decode() for j in images]
         body: dict = {"model": self.model, "stream": False, "keep_alive": "10m",
-                      "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                      "messages": [{"role": "system", "content": system}, msg],
                       "format": schema if self._schema_ok else "json",
                       "options": {"temperature": temperature, "num_ctx": self.context, "num_predict": max_tokens}}
         if self._think:

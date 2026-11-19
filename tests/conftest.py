@@ -22,3 +22,9 @@ def tmp_output(monkeypatch, tmp_path):
 def make_words(text: str, start: float = 0.0, step: float = 0.5, length: float = 0.4) -> list[dict]:
     return [{"w": w, "s": round(start + i * step, 3), "e": round(start + i * step + length, 3)}
             for i, w in enumerate(text.split())]
+
+
+@pytest.fixture(autouse=True)
+def _ai_cant_see(monkeypatch):
+    """Tests never ask a real AI server whether it can see images (clippy/vision.py); vision tests turn it on."""
+    monkeypatch.setenv("CLIPPY_VISION", "off")
