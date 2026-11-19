@@ -216,7 +216,7 @@ async function refreshGlobal() {
     $("#railStatus").innerHTML = `
       <div class="line" title="${esc(st.llm ? `${st.model} on ${st.ai}` : (st.ai_error || ""))}"><span class="dot ${st.llm ? "ok" : "bad"}"></span>Local AI ${st.llm ? "online" : "offline"}</div>
       ${st.vram_free != null ? `<div class="line"><span class="dot ok"></span>GPU: ${(st.vram_free / 1024).toFixed(1)}&nbsp;GB free</div>` : ""}
-      ${run ? `<div class="onair"><div class="what"><span class="dot live"></span>${run.kind === "auto" ? "Autopilot on air" : "Making clips"}</div>
+      ${run ? `<div class="onair"><div class="what"><span class="dot live"></span>${run.kind === "auto" ? "Autopilot on air" : run.kind === "fix" ? "Fixing a short" : "Making clips"}</div>
         <div class="bar"><i style="width:${(run.pct * 100).toFixed(1)}%"></i></div><div class="msg">${esc(run.msg || "")}</div>
         <button type="button" class="btn sm quiet" data-cancel="${run.id}">${icon("stop")} Cancel</button></div>`
         : st.queued ? `<div class="onair"><div class="msg">${st.queued} job${st.queued > 1 ? "s" : ""} waiting</div></div>` : ""}`;
@@ -235,6 +235,7 @@ function clipCard(c) {
       <h3>${esc(c.title)}</h3>
       ${post ? `<div class="cap">${esc(post)}</div>` : ""}
       <div class="acts"><a class="btn sm" href="/media/${encodeURI(c.file)}" download>${icon("download")} Download</a>
+        <button type="button" class="btn sm" data-fix-file="${esc(c.file)}">${icon("pencil")} Quick Fix</button>
         ${post ? `<button type="button" class="btn sm" data-copy="${esc(post)}">${icon("copy")} Copy Caption</button>` : ""}</div>
     </div></article>`;
 }
@@ -473,6 +474,11 @@ pages.make = async (el) => {
     $("#mResSub").textContent = res.title;
     $("#mRes").innerHTML = res.clips.map(clipCard).join("");
     bindCopy($("#mRes"));
+    bindFix($("#mRes"), (r, old) => {                 // swap in the fixed short
+      const c = r && res.clips.find((x) => x.file.replace(/\\/g, "/") === old.replace(/\\/g, "/"));
+      if (c) Object.assign(c, {file: r.file, thumb: r.thumb, duration: r.duration, title: r.title});
+      if ($("#mRes")) showResult(res);
+    });
   };
   if (state.lastResult) showResult(state.lastResult);
 
@@ -985,6 +991,7 @@ pages.review = async (el) => {
     $("#rvList").innerHTML = items.map(reviewCard).join("");
     $$("[data-title]").forEach((inp) => inp.oninput = () => { $(`[data-cnt="${inp.dataset.title}"]`).textContent = inp.value.length + "/100"; });
     $$("#rvList [data-act]").forEach((b) => b.onclick = () => act(b.dataset.id, b.dataset.act, b));
+    bindFix($("#rvList"), () => load(true));
     cards().forEach((c, k) => c.addEventListener("focusin", () => focusCard(k, false)));
     focusCard(Math.min(cur, items.length - 1), false);
     if (items.some((i) => i.status === "approved" || i.status === "uploading")) setTimeout(() => { if ($("#rvList")) load(false); }, 2500);
@@ -1007,10 +1014,10 @@ function reviewCard(i) {
   const editable = i.status === "pending" || i.status === "failed";
   let actions;
   if (i.status === "pending") actions = `<button type="button" class="btn primary" data-act="approve" data-id="${i.id}">${icon("check")} Approve &amp; Publish</button>
-      <button type="button" class="btn" data-act="save" data-id="${i.id}">Save Edits</button><button type="button" class="btn quiet danger" data-act="reject" data-id="${i.id}">${icon("x")} Reject</button>`;
+      <button type="button" class="btn" data-act="save" data-id="${i.id}">Save Edits</button><button type="button" class="btn" data-fix-file="${esc(i.file)}">${icon("pencil")} Quick Fix</button><button type="button" class="btn quiet danger" data-act="reject" data-id="${i.id}">${icon("x")} Reject</button>`;
   else if (i.status === "approved") actions = `<span class="tag you"><span class="spin" style="width:12px;height:12px"></span> Uploading in a few seconds</span><button type="button" class="btn sm quiet" data-act="restore" data-id="${i.id}">Undo</button>`;
   else if (i.status === "uploading") actions = `<div style="flex:1;max-width:320px"><div class="row small" style="gap:8px;margin-bottom:6px"><span class="dot live"></span>Uploading <span class="num">${Math.round((i.upload_pct || 0) * 100)}%</span></div><div class="bar"><i style="width:${Math.round((i.upload_pct || 0) * 100)}%"></i></div></div>`;
-  else if (i.status === "failed") actions = `<button type="button" class="btn primary" data-act="retry" data-id="${i.id}">${icon("refresh")} Try Again</button><button type="button" class="btn quiet danger" data-act="reject" data-id="${i.id}">Reject</button>`;
+  else if (i.status === "failed") actions = `<button type="button" class="btn primary" data-act="retry" data-id="${i.id}">${icon("refresh")} Try Again</button><button type="button" class="btn" data-fix-file="${esc(i.file)}">${icon("pencil")} Quick Fix</button><button type="button" class="btn quiet danger" data-act="reject" data-id="${i.id}">Reject</button>`;
   else if (i.status === "uploaded") actions = `${yt ? `<a class="btn primary" href="${esc(yt.url)}" target="_blank" rel="noopener">${icon("youtube")} View on YouTube</a>
       <span class="tag ${yt.privacy === "public" ? "ok" : ""}">${esc(yt.privacy)}${yt.publish_at ? `, goes live ${fmtDate(yt.publish_at)}` : ""}</span>` : ""}
       ${i.tiktok ? `<a class="btn" href="/media/${encodeURI(i.tiktok.file)}" download>${icon("phone")} TikTok File</a>` : ""}`;
@@ -1027,6 +1034,162 @@ function reviewCard(i) {
       <div><div class="lbl"><label for="d-${i.id}">Description</label></div><textarea class="input" id="d-${i.id}" rows="5" data-desc="${i.id}" ${editable ? "" : "disabled"}>${esc(i.description)}</textarea></div>
       <div class="row">${actions}<a class="btn quiet icon" href="/media/${encodeURI(i.file)}" download aria-label="Download this short" title="Download">${icon("download")}</a></div>
     </div></article>`;
+}
+
+// ───────────────────────── quick fix ─────────────────────────
+// fix an almost-good short without another editor: where it starts and ends, misspelled caption words, its title
+const fmtT = (s) => { s = Math.max(0, +s || 0); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; };
+function bindFix(root, after) {
+  $$("[data-fix-file]", root).forEach((b) => b.onclick = () => openQuickFix(b.dataset.fixFile, {after}));
+}
+async function openQuickFix(file, {after = () => {}} = {}) {
+  let d;
+  try { d = await api.get("/api/fix?file=" + encodeURIComponent(file)); } catch (e) { fail(e); return; }
+  const st = {start: d.start, end: d.end, words: {}, title: d.title, sel: null, busy: false};
+  const list = d.words, pos = new Map(list.map((w, k) => [w.i, k]));
+  const bounds = d.kind !== "countdown", hasWords = list.length > 0;
+  const r3 = (x) => Math.round(x * 1000) / 1000;
+  const inShort = (w) => d.kind === "countdown" ? d.segments.some((g) => w.s >= g.start - 0.05 && w.e <= g.end + 0.05)
+    : w.s >= st.start - 0.05 && w.e <= st.end + 0.05;
+  const text = (w) => st.words[w.i] ?? w.w;
+  const pending = () => {
+    const out = [], ds = st.start - d.start, de = st.end - d.end;
+    if (Math.abs(ds) > 0.01) out.push(`Starts ${Math.abs(ds).toFixed(1)} s ${ds < 0 ? "earlier" : "later"}`);
+    if (Math.abs(de) > 0.01) out.push(`Ends ${Math.abs(de).toFixed(1)} s ${de < 0 ? "earlier" : "later"}`);
+    for (const [i, v] of Object.entries(st.words)) { const w = list[pos.get(+i)]; out.push(v === w.orig && w.w !== w.orig ? `“${w.w}” back to “${v}”` : `“${w.w}” becomes “${v}”`); }
+    if (st.title.trim() && st.title.trim() !== d.title) out.push("A new title");
+    return out;
+  };
+  const nudges = (which) => [-1, -0.25, 0.25, 1].map((v) => `<button type="button" class="btn sm quiet" data-nudge="${which}:${v}" aria-label="${which === "start" ? "Start" : "End"} ${Math.abs(v)} seconds ${v < 0 ? "earlier" : "later"}">${v < 0 ? "−" : "+"}${Math.abs(v) === 0.25 ? "¼" : "1"}&thinsp;s</button>`).join("");
+  const srcNote = d.source ? "" : d.redownload
+    ? `<div class="note"><div class="ic">${icon("info")}</div><div><b>The downloaded video was deleted</b><p>Previews need it. Rendering downloads it again first, so that takes a little longer.</p></div></div>`
+    : `<div class="note err"><div class="ic">${icon("alert")}</div><div><b>The original video isn't on this PC anymore</b><p>It was deleted, so this short can't be rendered again. Upload the video again and make new shorts from it.</p></div></div>`;
+  const m = openModal(`<div class="mh"><div class="row between"><h2>Quick Fix</h2><button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div>
+      <p class="muted small" style="margin:4px 0 0">Change where it starts and ends, or fix a misspelled word, then render just this short again.</p></div>
+    <div class="mb" id="qf"><div class="qf">
+      <div class="qf-side">
+        <video class="qf-short" src="/media/${encodeURI(d.file)}" poster="/media/${encodeURI(d.file.replace(/\.mp4$/i, ".jpg"))}" controls playsinline preload="metadata" aria-label="The current short"></video>
+        <p class="small faint" style="margin:6px 0 0">The current short${d.short_duration ? `, ${Math.round(d.short_duration)} s` : ""}. It stays until the new one is ready.</p>
+        <div class="qf-changes" id="qfChanges" aria-live="polite"></div>
+      </div>
+      <div class="qf-main">
+        ${d.source ? `<video id="qfSrc" class="qf-src" src="/media/${encodeURI(d.source)}#t=${d.start}" preload="metadata" playsinline controls aria-label="The original video"></video>` : srcNote}
+        ${bounds ? `<div class="qf-bounds">
+          <div class="qf-b"><div><span class="small muted">Starts at</span> <b class="num" id="qfS"></b></div>
+            <div class="row" style="gap:4px">${nudges("start")}${d.source ? `<button type="button" class="btn sm" data-q="playStart">${icon("play")} Play the Start</button>` : ""}</div></div>
+          <div class="qf-b"><div><span class="small muted">Ends at</span> <b class="num" id="qfE"></b></div>
+            <div class="row" style="gap:4px">${nudges("end")}${d.source ? `<button type="button" class="btn sm" data-q="playEnd">${icon("play")} Play the End</button>` : ""}</div></div>
+          <p class="small faint" id="qfLen" style="margin:0"></p></div>`
+          : `<div class="note"><div class="ic">${icon("info")}</div><div><b>A countdown</b><p>Fix its words and title here. Its moments can't be moved yet.</p></div></div>`}
+        ${hasWords ? `<div><div class="lbl"><span>What's said</span><span class="small faint">Tap a word to start or end the short there, or to fix it</span></div>
+            <div class="qf-tool" id="qfTool"></div><div class="qf-words" id="qfWords" role="group" aria-label="Transcript"></div></div>`
+          : d.kind === "visual" ? `<p class="small faint" style="margin:0">No talking in this short, so there are no captions to fix.</p>` : ""}
+        <div><div class="lbl"><label for="qfTitle">Title on the short</label></div><input class="input" id="qfTitle" type="text" maxlength="100" autocomplete="off" value="${esc(d.title)}"></div>
+      </div></div></div>
+    <div class="mf"><div class="grow small" id="qfStatus" aria-live="polite"></div><button type="button" class="btn quiet" data-close>Close</button>
+      <button type="button" class="btn primary" id="qfGo">${icon("refresh")} Render This Short</button></div>`,
+    {label: "Quick Fix", onClose: async () => {
+      if (st.busy) { toast("It keeps rendering. The new short shows up when it's done.", "info"); return true; }
+      return !pending().length || await confirmDialog({title: "Discard your changes?", body: "They haven't been rendered yet.", confirm: "Discard", danger: true});
+    }});
+  $$("[data-close]", m).forEach((b) => b.onclick = () => closeModal());
+  const v = $("#qfSrc", m);
+  let stopAt = null;
+  const play = (a, b) => { if (!v) return; v.currentTime = Math.max(0, a); stopAt = b; v.play().catch(() => {}); };
+  if (v) v.addEventListener("timeupdate", () => {
+    if (stopAt != null && v.currentTime >= stopAt) { v.pause(); stopAt = null; }
+    const now = !v.paused && list.find((w) => v.currentTime >= w.s && v.currentTime <= w.e + 0.05);
+    $$(".qw.now", m).forEach((b) => b.classList.remove("now"));
+    if (now) $(`.qw[data-i="${now.i}"]`, m)?.classList.add("now");          // the word being said while it plays
+  });
+  if (v) v.addEventListener("pause", () => $$(".qw.now", m).forEach((b) => b.classList.remove("now")));
+  const draw = () => {
+    if (bounds) {
+      $("#qfS", m).textContent = fmtT(st.start); $("#qfE", m).textContent = fmtT(st.end);
+      const lost = d.teaser && (st.start > d.teaser.start + 0.01 || st.end < d.teaser.end - 0.01);
+      const tz = d.teaser && !lost ? ` It opens with a ${(d.teaser.end - d.teaser.start).toFixed(1)} s flash-forward from ${fmtT(d.teaser.start)} (the teaser), then plays from the start.` : "";
+      $("#qfLen", m).textContent = `${(st.end - st.start).toFixed(1)} s of the video. Pauses are cut when it renders, so the short ends up a little shorter.${tz}${lost ? " Its flash-forward teaser is left out: that moment isn't between the new start and end." : ""}`;
+    }
+    if (hasWords) {
+      const ins = list.filter(inShort), first = ins[0]?.i, last = ins[ins.length - 1]?.i;
+      $("#qfWords", m).innerHTML = list.map((w) => `<button type="button" class="qw${inShort(w) ? " in" : ""}${w.i === first ? " first" : ""}${w.i === last ? " last" : ""}${d.fixed[w.i] != null ? " fixed" : ""}${st.words[w.i] != null ? " pend" : ""}${st.sel === w.i ? " sel" : ""}" data-i="${w.i}" title="${fmtT(w.s)}${w.w !== w.orig ? `: was “${esc(w.orig)}”` : ""}">${esc(text(w))}</button>`).join(" ");
+      $$(".qw", m).forEach((b) => b.onclick = () => { st.sel = +b.dataset.i; draw(); $("#qfWord", m)?.focus(); });
+      const w = st.sel != null ? list[pos.get(st.sel)] : null;
+      $("#qfTool", m).innerHTML = w ? `<span class="small muted">“${esc(text(w))}” at ${fmtT(w.s)}</span>
+        ${bounds ? `<button type="button" class="btn sm" data-q="startHere">Start Here</button><button type="button" class="btn sm" data-q="endHere">End Here</button>` : ""}
+        ${d.source ? `<button type="button" class="btn sm quiet" data-q="playWord">${icon("play")} Play</button>` : ""}
+        <input class="input" id="qfWord" type="text" maxlength="60" autocomplete="off" spellcheck="true" value="${esc(text(w))}" aria-label="Correct this word">
+        <button type="button" class="btn sm" data-q="setWord">${icon("pencil")} Fix Word</button>` : "";
+      $("#qfWord", m)?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); act("setWord"); } });
+      $$("#qfTool [data-q]", m).forEach((b) => b.onclick = () => act(b.dataset.q));
+    }
+    const ch = pending();
+    $("#qfChanges", m).innerHTML = ch.length ? `<b class="small">Changes to render</b><ul class="small">${ch.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>` : "";
+    if (!st.busy) {
+      $("#qfStatus", m).textContent = ch.length ? `${ch.length} change${ch.length > 1 ? "s" : ""} to render` : "No changes yet";
+      $("#qfGo", m).disabled = !ch.length || (!d.source && !d.redownload);
+    }
+  };
+  const act = (q) => {
+    const w = st.sel != null ? list[pos.get(st.sel)] : null, k = w ? pos.get(w.i) : -1;
+    if (q === "playStart") play(st.start, st.start + 4);
+    else if (q === "playEnd") play(Math.max(st.start, st.end - 4), st.end);
+    else if (q === "playWord" && w) play(w.s - 0.3, w.e + 0.5);
+    else if (q === "startHere" && w) {
+      let s = w.s - 0.12; if (k > 0) s = Math.max(s, list[k - 1].e + 0.02);     // like the AI's own picks
+      if (st.end - s < 3) return toast("A short needs at least 3 seconds", "bad");
+      st.start = r3(Math.max(0, s)); draw();
+    } else if (q === "endHere" && w) {
+      let e = w.e + 0.45; if (k < list.length - 1) e = Math.min(e, list[k + 1].s - 0.03); e = Math.max(e, w.e + 0.05);
+      if (e - st.start < 3) return toast("A short needs at least 3 seconds", "bad");
+      st.end = r3(Math.min(d.duration, e)); draw();
+    } else if (q === "setWord" && w) {
+      const nv = ($("#qfWord", m).value || "").replace(/\s+/g, " ").trim();
+      if (!nv || nv === w.w) delete st.words[w.i]; else st.words[w.i] = nv;
+      st.sel = null; draw();
+      $(`.qw[data-i="${w.i}"]`, m)?.focus();
+    }
+  };
+  $$("[data-q]", m).forEach((b) => b.onclick = () => act(b.dataset.q));
+  $$("[data-nudge]", m).forEach((b) => b.onclick = () => {
+    const [which, dv] = b.dataset.nudge.split(":"); const dlt = +dv;
+    if (which === "start") st.start = r3(Math.max(0, Math.min(st.end - 3, st.start + dlt)));
+    else st.end = r3(Math.min(d.duration, Math.max(st.start + 3, st.end + dlt)));
+    draw();
+  });
+  $("#qfTitle", m).oninput = (e) => { st.title = e.target.value; draw(); };
+  $("#qfGo", m).onclick = async () => {
+    const body = {file: d.file};
+    if (Math.abs(st.start - d.start) > 0.01) body.start = st.start;
+    if (Math.abs(st.end - d.end) > 0.01) body.end = st.end;
+    if (Object.keys(st.words).length) body.words = st.words;
+    if (st.title.trim() && st.title.trim() !== d.title) body.title = st.title.trim();
+    st.busy = true; $("#qfGo", m).disabled = true;
+    $("#qfStatus", m).innerHTML = `<div class="bar wait"><i style="width:0%"></i></div><span class="faint">Waiting in line…</span>`;
+    let job;
+    try { job = await api.post("/api/fix", body); }
+    catch (e) { st.busy = false; draw(); $("#qfStatus", m).innerHTML = `<span class="err-text">${esc(e.message)}</span>`; return; }
+    const t = setInterval(async () => {
+      let j; try { j = await api.get("/api/jobs/" + job.id); } catch { return; }
+      const open = $("#qf") === $("#qf", m) && document.body.contains(m);
+      if (j.state === "done") {
+        clearInterval(t); st.busy = false; after(j.result, d.file); refreshGlobal();
+        toast("Short updated: the new version is ready");
+        if (open) openQuickFix(j.result.file, {after});          // the editor again, now on the new short
+        return;
+      }
+      if (j.state === "error" || j.state === "cancelled") {
+        clearInterval(t); st.busy = false;
+        if (open) { draw(); $("#qfStatus", m).innerHTML = `<span class="err-text">${esc(j.error || "Cancelled")}</span>`; }
+        else toast(j.error || "The fix was cancelled", "bad");
+        return;
+      }
+      if (open) $("#qfStatus", m).innerHTML = `<div class="bar ${j.state === "queued" ? "wait" : ""}"><i style="width:${Math.round((j.pct || 0) * 100)}%"></i></div><span class="faint">${esc(j.msg || "Rendering…")}</span>`;
+    }, 1000);
+  };
+  draw();
+  const box = $("#qfWords", m), first = $(".qw.first", m) || $(".qw.in", m);
+  if (box && first) box.scrollTop = Math.max(0, first.offsetTop - box.offsetTop - 34);   // open where the short starts
 }
 
 // ═════════════════════════ LIBRARY ═════════════════════════
@@ -1067,7 +1230,7 @@ pages.library = async (el) => {
       const m = openModal(`<div class="mh"><div class="row between"><h2 class="break">${esc(it.title)}</h2><button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div>
         <p class="muted small" style="margin:4px 0 12px">${it.clips.length} shorts. <a href="${esc(it.url)}" target="_blank" rel="noopener">Open the source video</a></p></div>
         <div class="mb"><div class="clips">${it.clips.map(clipCard).join("")}</div></div>`, {label: it.title});
-      $("[data-close]", m).onclick = () => closeModal(); bindCopy(m);
+      $("[data-close]", m).onclick = () => closeModal(); bindCopy(m); bindFix(m, () => load());
     });
     $$("[data-src]").forEach((b) => b.onclick = async () => {
       try { const r = await api.post(`/api/storage/${encodeURIComponent(b.dataset.src)}/source/delete`); toast(`Freed ${fmtBytes(r.freed)} — your shorts are kept`); load(); } catch (e) { fail(e); }

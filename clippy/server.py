@@ -94,6 +94,11 @@ def _run_job(jid: str) -> None:
         if job["kind"] == "auto":
             from .autopilot import run_profile
             result = run_profile(job["profile_id"], pipeline.run, prog, log)
+        elif job["kind"] == "fix":
+            from . import quickfix
+            o = job["options"]
+            result = quickfix.apply(job["url"], o.get("start"), o.get("end"), o.get("words"), o.get("title"),
+                                    progress=lambda p, m="": prog("render", p, m), log=log)
         else:
             result = pipeline.run(job["url"], job["options"], prog, log, on_info=on_info)
         STORE.update(jid, state="done", result=result, finished=time.time())
@@ -121,6 +126,37 @@ def create_job(body: JobIn):
     if not url:
         raise HTTPException(400, "Paste a YouTube link first")
     job = _new_job(url=url, options={k: v for k, v in body.options.items() if k in ALLOWED})
+    return {"id": job["id"]}
+
+
+class FixIn(BaseModel):
+    file: str
+    start: float | None = None
+    end: float | None = None
+    words: dict[str, str] = {}
+    title: str | None = None
+
+
+@app.get("/api/fix")
+def fix_info(file: str):
+    """Quick Fix: where a short sits in its source video, the words around it, and earlier fixes."""
+    from . import quickfix
+    try:
+        return quickfix.info(file)
+    except quickfix.FixError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/fix")
+def fix_short(body: FixIn):
+    """Render one short again with new start/end, caption words or title (a job, so it waits its turn)."""
+    from . import quickfix
+    try:
+        d = quickfix.load(body.file)                # a clear message now, not after waiting in line
+    except quickfix.FixError as e:
+        raise HTTPException(400, str(e))
+    job = _new_job(kind="fix", url=d["rel"], title=d["pick"].get("title") or "",
+                   options={"start": body.start, "end": body.end, "words": body.words, "title": body.title})
     return {"id": job["id"]}
 
 

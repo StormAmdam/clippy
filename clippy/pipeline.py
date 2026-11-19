@@ -43,6 +43,21 @@ class Progress:
         return lambda p, msg="": self.cb(name, p, msg)
 
 
+SIDECAR = ".clip.json"      # next to each short: the pick and settings it was made with (clippy/quickfix.py)
+
+
+def sidecar(out: Path) -> Path:
+    return out.with_name(out.stem + SIDECAR)
+
+
+def render_settings(cfg, visual: bool, countdown: bool):
+    """The settings a short renders with. No talking: no captions, the music untouched, every frame kept, the hook
+    title the whole time. A countdown builds up by itself, so no teaser."""
+    rcfg = dataclasses.replace(cfg, voice_polish=False, remove_silences=False,
+                               title_seconds=-1 if cfg.title_seconds != 0 else 0) if visual else cfg
+    return dataclasses.replace(rcfg, teaser=False) if countdown else rcfg
+
+
 def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, msg: None, log=print,
         on_info=None) -> dict:
     cfg = config.load(overrides)
@@ -110,12 +125,9 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
             clips = pick_clips(cfg, info, tr, progress=p, log=log, env=env)
         config.write_atomic(picks_file, json.dumps(clips, ensure_ascii=False, indent=2))
 
-    # no talking: no captions, keep the music untouched, keep every frame, show the hook title the whole time
-    rcfg = dataclasses.replace(cfg, voice_polish=False, remove_silences=False,
-                               title_seconds=-1 if cfg.title_seconds != 0 else 0) if visual else cfg
+    rcfg = render_settings(cfg, visual, countdown)
     words = [] if visual else tr["words"]
-    if countdown:
-        rcfg = dataclasses.replace(rcfg, teaser=False)   # the countdown's own build-up does that job
+    made_with = {k: v for k, v in (overrides or {}).items() if k != "reuse_picks"}
 
     p = pr.stage("render")
     out_dir = workdir / re.sub(r"[^\w-]", "", str((overrides or {}).get("clips_dir") or
@@ -136,6 +148,8 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
         log(f"  rendering {name}")
         sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
         stats = render_clip(rcfg, src, vinfo, clip, words, env, out, progress=sub, log=log)
+        config.write_atomic(sidecar(out), json.dumps({"pick": clip, "overrides": made_with, "visual": visual,
+                                                      "countdown": countdown}, ensure_ascii=False))
         extra = {"format": "top", "ranks": [{"rank": s["rank"], "label": s["label"], "start": s["start"],
                                             "end": s["end"]} for s in clip["segments"]]} if clip.get("segments") else {}
         results.append({**{k: clip.get(k) for k in ("title", "caption", "hashtags", "score", "why", "start", "end")},
