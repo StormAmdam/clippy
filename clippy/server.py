@@ -425,13 +425,17 @@ def status():
             "running": {k: running.get(k) for k in ("id", "kind", "url", "stage", "pct", "msg", "profile_id")} if running else None}
 
 
-def _sees(cfg, s) -> bool:
-    """Can the AI in use look at images (clippy/vision.py)? A built-in AI that isn't loaded: when its vision file is
-    there. Never starts or loads anything."""
+def _sees(cfg, s) -> bool | None:
+    """Can the AI in use look at images (clippy/vision.py)? None when that's turned off in Settings. A built-in AI
+    that isn't loaded: when its vision file is there and loaded lately. Never starts or loads anything."""
     from . import engine, llm
-    if s.kind == "Built-in AI" and not s.base:
+    if str(cfg.vision).lower() == "off":
+        return None
+    if s.kind == "Built-in AI":
         m = engine.model_path(cfg)
-        return bool(m and engine.vision_file(m).exists())
+        if s.base:
+            return engine.ENGINE.vision
+        return bool(m and engine.vision_file(m).exists() and not engine.ENGINE.gave_up(m, "vision"))
     try:
         c = llm.LLM(cfg)
         c._use(s)

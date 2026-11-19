@@ -168,8 +168,9 @@ def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, 
     try:
         for i, clip in enumerate(clips):
             sub = lambda q, msg="", i=i: p((i + q) / len(clips), f"Clip {i + 1}/{len(clips)}: {msg}")
-            parts = None                                # the first clip plans here, with progress and Cancel
-            if nxt is not None:
+            if nxt is None:                             # the first clip plans here, with progress and Cancel,
+                parts = plan(rcfg, src, vinfo, clip, words, env, eyes, log, sub)   # before the next one starts
+            else:
                 while True:
                     try:
                         parts = nxt.result(timeout=1)

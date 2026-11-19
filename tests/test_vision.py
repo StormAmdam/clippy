@@ -32,6 +32,26 @@ def test_images_go_with_the_prompt_to_openai_style_servers(monkeypatch):
     assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,/9hqcGVn")
 
 
+def test_a_server_without_json_schema_still_answers_about_images_but_keeps_its_features(monkeypatch):
+    sent = []
+
+    def post(url, headers=None, json=None, timeout=None):
+        sent.append(json)
+        if json["response_format"]["type"] == "json_schema" or "chat_template_kwargs" in json:
+            return httpx.Response(400, text="unsupported field", request=httpx.Request("POST", url))
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]},
+                              request=httpx.Request("POST", url))
+    monkeypatch.setattr(llm.httpx, "post", post)
+    c = _client(monkeypatch)
+    assert c.json("sys", "look", {"type": "object"}, images=[b"jpeg"]) == {"ok": True}
+    assert len(sent) == 3 and c._schema_ok and c._kwargs_ok      # simpler for this request only
+    monkeypatch.setattr(llm.httpx, "post", lambda url, **k: httpx.Response(
+        400, text="image input is not supported", request=httpx.Request("POST", url)))
+    with pytest.raises(RuntimeError, match="400"):
+        c.json("sys", "look", {"type": "object"}, images=[b"jpeg"])
+    assert c._schema_ok and c._kwargs_ok                          # a refused picture changes nothing for later
+
+
 def test_images_go_to_ollama_its_own_way(monkeypatch):
     seen = {}
 
@@ -217,6 +237,8 @@ def test_the_best_looking_candidates_are_kept(monkeypatch):
     looks = {"Dull slide": 1, "Big moment": 10, "Fine": 6}
 
     class Eyes:
+        llm = "ai"
+
         def rate(self, frames, about=""):
             return looks[about], "because"
     kept = vision.rerank(Eyes(), clips, "v.mp4", 2, log=lambda m: None)
@@ -249,14 +271,26 @@ def test_the_built_in_ai_loads_its_vision_file(tmp_path, monkeypatch, tmp_output
     monkeypatch.setattr(engine.subprocess, "Popen", lambda args, **k: calls.append(args) or Proc())
     with pytest.raises(RuntimeError):
         engine.Engine().start(config.Settings(), model)
-    first, no_eyes, plain = calls
+    first, eyes_only, no_eyes, plain = calls
     assert first[-6:] == ["--mmproj", "Qwen3.5-4B-Q4_K_M.mmproj.gguf", *engine.KV8]   # its eyes, 8-bit memory
+    assert eyes_only[-2:] == ["--mmproj", "Qwen3.5-4B-Q4_K_M.mmproj.gguf"]           # an engine without 8-bit
     assert "--mmproj" not in no_eyes and no_eyes[-4:] == engine.KV8                # a vision file it can't load
-    assert "--mmproj" not in plain and "q8_0" not in plain                         # then the usual memory too
+    assert "--mmproj" not in plain and "q8_0" not in plain                         # then neither
     calls.clear()
     with pytest.raises(RuntimeError):
         engine.Engine().start(config.Settings(vision="off"), model)
     assert all("--mmproj" not in a for a in calls)
+    # an engine that can't do 8-bit memory keeps its eyes; only the 8-bit is left out next time, for a while
+    calls.clear()
+    eng = engine.Engine()
+    monkeypatch.setattr(engine.Engine, "_loaded", lambda self, *a: "q8_0" not in calls[-1])
+    monkeypatch.setattr(engine.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(engine.httpx.ConnectError("x")))
+    monkeypatch.setattr(eng, "_watch", type("T", (), {"is_alive": lambda self: True})())
+    eng.start(config.Settings(), model)
+    assert eng.vision and "--mmproj" in calls[-1] and len(calls) == 2
+    assert eng.gave_up(model, "kv8") and not eng.gave_up(model, "vision")
+    eng.failed[(model, "kv8")] -= engine.RETRY_EXTRAS + 1                        # half an hour later: tried again
+    assert not eng.gave_up(model, "kv8")
 
 
 def test_answers_about_shots_are_remembered_for_re_renders(tmp_path):
@@ -316,6 +350,8 @@ def test_a_failed_rating_counts_as_an_average_look(monkeypatch):
     monkeypatch.setattr(vision, "frames_at", lambda src, times, width=512: [np.zeros((4, 4, 3), np.uint8)])
 
     class Eyes:
+        llm = "ai"
+
         def rate(self, frames, about=""):
             return {"A": (8, "good"), "B": None, "C": (10, "great")}[about]
     kept = vision.rerank(Eyes(), clips, "v.mp4", 3, log=lambda m: None)
@@ -327,13 +363,25 @@ def test_vision_never_starts_a_stopped_ai_when_it_isnt_needed(monkeypatch):
     started = []
     monkeypatch.setattr(llm, "resolve", lambda cfg, *a, **k: llm.Server("", "Built-in AI", ["m"]))
     monkeypatch.setattr(llm.LLM, "wait_ready", lambda self, **k: started.append(1))
-    assert vision.eyes_for(config.Settings(vision="auto"), start=False) is None and started == []
+    eyes = vision.eyes_for(config.Settings(vision="auto"), start=False)
+    assert started == [] and eyes.llm is None and not vision.sees(eyes)    # only what it said before
+    assert vision.ranker(eyes, "v.mp4") is None and eyes.rate([np.zeros((4, 4, 3), np.uint8)]) is None
 
     def nothing(cfg, *a, **k):
         raise RuntimeError("no AI running")
     monkeypatch.setattr(llm, "resolve", nothing)
     said = []
-    assert vision.eyes_for(config.Settings(vision="auto"), log=said.append, start=False) is None and said == []
+    assert vision.eyes_for(config.Settings(vision="auto"), log=said.append, start=False).llm is None and said == []
+    assert vision.eyes_for(config.Settings(vision="off"), start=False) is None
+
+
+def test_a_re_render_without_the_ai_keeps_the_framing_it_said_before(tmp_path):
+    fake = FakeLLM({"frames": [{"n": 1, "kind": "scene", "subject": [100, 100, 500, 900], "cam": [], "wide": False}]})
+    frames = [np.zeros((288, 512, 3), np.uint8)] * 2
+    cache = tmp_path / "vision.json"
+    said = vision.Eyes(fake, log=lambda m: None).shots(frames[:1], keys=["10.00"], cache=cache)
+    remembered = vision.Eyes(None, log=lambda m: None).shots(frames, keys=["10.00", "99.00"], cache=cache)
+    assert remembered[0] == said[0] and remembered[1] is None                # a new frame: no answer, no request
 
 
 def test_settings_says_whether_the_ai_can_see(tmp_path, monkeypatch, tmp_output):
@@ -341,10 +389,16 @@ def test_settings_says_whether_the_ai_can_see(tmp_path, monkeypatch, tmp_output)
     monkeypatch.setattr(components, "LLM_DIR", tmp_path)
     model = tmp_path / "Qwen3.5-4B-Q4_K_M.gguf"
     model.write_bytes(b"m")
+    import dataclasses
     stopped = llm.Server("", "Built-in AI", [model.stem])
-    assert server._sees(config.load(), stopped) is False            # not loaded, no vision file: no
+    cfg = dataclasses.replace(config.load(), vision="auto")
+    assert server._sees(cfg, stopped) is False            # not loaded, no vision file: no
     engine.vision_file(model).write_bytes(b"v")
-    assert server._sees(config.load(), stopped) is True             # its vision file is there: it will see
+    assert server._sees(cfg, stopped) is True             # its vision file is there: it will see
+    engine.ENGINE.failed[(model, "vision")] = __import__("time").time()
+    assert server._sees(cfg, stopped) is False            # …unless it couldn't load it lately
+    engine.ENGINE.failed.clear()
+    assert server._sees(config.Settings(vision="off"), stopped) is None   # turned off: no claim, no hint
     monkeypatch.setattr(llm.httpx, "get", lambda url, **k: httpx.Response(200, json={"modalities": {"vision": True}},
                                                                           request=httpx.Request("GET", url)))
-    assert server._sees(config.load(), llm.Server("http://127.0.0.1:8080/v1", "llama.cpp", ["m"])) is True
+    assert server._sees(cfg, llm.Server("http://127.0.0.1:8080/v1", "llama.cpp", ["m"])) is True

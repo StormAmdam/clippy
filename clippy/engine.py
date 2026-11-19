@@ -142,6 +142,7 @@ def install_vision(mid: str) -> components.Task:
 
     def go(t: components.Task):
         components.fetch(m["mmproj_url"], vision_file(components.LLM_DIR / m["file"]), t, f"Vision for {m['name']}")
+        ENGINE.failed.pop((components.LLM_DIR / m["file"], "vision"), None)   # a fresh file: try it again
         if ENGINE.model == components.LLM_DIR / m["file"]:
             ENGINE.stop()                                 # loads again with its eyes next time
 
@@ -163,6 +164,9 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+RETRY_EXTRAS = 1800.0      # seconds before an extra that wouldn't load is tried again
+
+
 class Engine:
     """One llama-server process, owned by Clippy."""
 
@@ -170,7 +174,7 @@ class Engine:
         self.proc: subprocess.Popen | None = None
         self.model: Path | None = None
         self.vision = False
-        self.failed: set = set()                         # (model, "vision" | "kv8"): extras it couldn't load
+        self.failed: dict = {}                           # (model, "vision" | "kv8") -> when it couldn't load it
         self.port = 0
         self.context = 0
         self.last_used = 0.0
@@ -185,10 +189,15 @@ class Engine:
     def base(self) -> str:
         return f"http://127.0.0.1:{self.port}/v1"
 
+    def gave_up(self, model: Path, extra: str) -> bool:
+        """It couldn't load this extra with this model lately (maybe the card was busy: tried again later)."""
+        t = self.failed.get((model, extra))
+        return t is not None and time.time() - t < RETRY_EXTRAS
+
     def start(self, cfg, model: Path) -> None:
         with self.lock:
             see = (vision_file(model).exists() and str(getattr(cfg, "vision", "auto")).lower() != "off"
-                   and (model, "vision") not in self.failed)
+                   and not self.gave_up(model, "vision"))
             if self.running() and self.model == model and self.vision == see:
                 self.touch()
                 return
@@ -211,9 +220,9 @@ class Engine:
                     "-c", str(cfg.ai_context or CONTEXT), "--parallel", "1", "--threads", str(hw["threads"]),
                     "--fit", "on", "--fit-target", "4500" if hw["vram_mb"] >= 10 * 1024 else "1024"]
             # its eyes (the vision file) and 8-bit working memory (half the size, so more fits on a small card) are
-            # extras: an engine, file or card that can't load them gets them dropped, vision first, then 8-bit
-            kv8 = (model, "kv8") not in self.failed
-            tries = [(see, kv8)] + ([(False, kv8)] if see else []) + ([(False, False)] if kv8 else [])
+            # extras: an engine, file or card that can't load one gets it dropped, the other kept if it can
+            kv8 = not self.gave_up(model, "kv8")
+            tries = [(v, k) for v in ((True, False) if see else (False,)) for k in ((True, False) if kv8 else (False,))]
             # Windows: tied to Clippy (clippy/quiet.py), so it ends when Clippy does, even if Clippy crashes
             extra = {"start_new_session": True} if sys.platform != "win32" else components.hidden()
             for n_try, (vis, k8) in enumerate(tries):
@@ -223,11 +232,13 @@ class Engine:
                                                  cwd=model.parent, **extra)
                 self.model, self.port, self.vision = model, port, vis
                 if self._loaded(model, log_file, port):
+                    # loaded without an extra it tried first with the other one the same: that extra is the trouble
+                    for extra, wanted, got in (("vision", see, vis), ("kv8", kv8, k8)):
+                        if wanted and not got:
+                            self.failed[(model, extra)] = time.time()
                     break
                 tail = log_file.read_bytes()[-600:].decode(errors="replace")
                 if n_try + 1 < len(tries):
-                    nxt = tries[n_try + 1]
-                    self.failed.add((model, "vision" if vis and not nxt[0] else "kv8"))
                     continue
                 raise RuntimeError(f"The AI engine stopped while loading {model.stem}. Last lines of its log:\n{tail}")
             try:

@@ -122,7 +122,7 @@ def test_with_eyes_a_moment_that_looks_dull_drops_out(ai):
                   m(30, 31, 76, "Crazy jump")]
     looks = {"Talking head": 1, "Big fall": 9, "Best": 8, "Crazy jump": 9}
 
-    def rank(cands):
+    def rank(cands, progress=None):
         for c in cands:
             c["look"] = looks[c["label"]]
         return sorted(cands, key=lambda c: -(0.75 * c["score"] + 2.5 * c["look"]))

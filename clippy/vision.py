@@ -86,7 +86,8 @@ def _box(v, W: float, H: float) -> tuple[float, float, float, float] | None:
 
 
 class Eyes:
-    """Looks at frames with the AI that picks clips. Created only when that AI can see (see eyes_for)."""
+    """Looks at frames with the AI that picks clips, when that AI can see (see eyes_for). llm=None: it only
+    remembers what the AI said about these frames before (vision.json), so a re-render frames shots the same."""
 
     def __init__(self, llm, log=print):
         self.llm, self.log = llm, log
@@ -98,6 +99,8 @@ class Eyes:
         known = _read_cache(cache) if cache and keys else {}
         if keys and all(k in known for k in keys):
             return [known[k] for k in keys]
+        if self.llm is None:                             # nothing to ask: what it remembers, and None
+            return [known.get(k) for k in keys] if keys else [None] * len(frames)
         ask = [i for i in range(len(frames)) if not keys or keys[i] not in known]
         got = self._ask_shots([frames[i] for i in ask])
         out: list[dict | None] = [known.get(k) for k in keys] if keys else [None] * len(frames)
@@ -130,6 +133,8 @@ class Eyes:
         return out
 
     def rate(self, frames: list[np.ndarray], about: str = "") -> tuple[int, str] | None:
+        if self.llm is None:
+            return None
         try:
             r = self.llm.json(RATE_SYSTEM, RATE_PROMPT.format(n=len(frames), about=f" ({about})" if about else ""),
                               RATE_SCHEMA, max_tokens=300, temperature=0.2, images=[jpeg(f) for f in frames])
@@ -165,7 +170,8 @@ def _write_cache(path, shots: dict) -> None:
 def eyes_for(cfg, log=print, start: bool = True) -> Eyes | None:
     """Eyes when the setting allows it and the AI can see; None otherwise (and nothing changes).
     start=False: only an AI that's already running (Quick Fix, no-talking videos, reused picks don't need the AI
-    otherwise, so nothing is loaded or downloaded just to look)."""
+    otherwise, so nothing is loaded or downloaded just to look); without one, Eyes that only remember what the AI
+    said before about these frames, so a re-render keeps the framing it had."""
     if str(getattr(cfg, "vision", "auto")).lower() == "off":
         return None
     try:
@@ -176,7 +182,7 @@ def eyes_for(cfg, log=print, start: bool = True) -> Eyes | None:
         else:
             s = resolve(cfg)
             if not s.base:                               # the built-in AI isn't running
-                return None
+                return Eyes(None, log)
             llm._use(s)
         if llm.can_see():
             log(f"  the AI can see ({llm.model}): it checks the framing and how each clip looks")
@@ -184,7 +190,7 @@ def eyes_for(cfg, log=print, start: bool = True) -> Eyes | None:
     except Exception as e:
         if start:
             log(f"  couldn't ask whether the AI can see ({str(e)[:120]})")
-    return None
+    return None if start else Eyes(None, log)
 
 
 def frames_at(src, times: list[float], width: int = 512) -> list[np.ndarray]:
@@ -200,45 +206,52 @@ def frames_at(src, times: list[float], width: int = 512) -> list[np.ndarray]:
     return out
 
 
-def rerank(eyes: Eyes | None, clips: list[dict], src, want: int, log=print) -> list[dict]:
-    """Rate how each candidate looks and keep the best `want` (score: 75% what's said, 25% how it looks)."""
-    if eyes is None or not clips:
-        return clips[:want]
-    for c in clips:
+def combined(said, look) -> int:
+    """A clip's score: 75% what's said (0-100), 25% how it looks (1-10). Unknown counts as average."""
+    return int(round(0.75 * (50.0 if said is None else float(said)) + 2.5 * (5 if look is None else look)))
+
+
+def sees(eyes: Eyes | None) -> bool:
+    """Eyes that can look now (not only remember what the AI said before)."""
+    return eyes is not None and eyes.llm is not None
+
+
+def _rate_all(eyes: Eyes, src, cands: list[dict], about, log, progress=None) -> None:
+    """Rates how each candidate looks (four frames across it) into c["look"], c["look_why"]."""
+    for i, c in enumerate(cands):
+        if progress is not None:
+            progress(i, len(cands))                     # also where a Cancel stops it
         s, e = float(c["start"]), float(c["end"])
         frames = frames_at(src, [s + (e - s) * f for f in (0.12, 0.38, 0.62, 0.88)])
-        got = eyes.rate(frames, c.get("title") or "") if frames else None
-        said = float(c["score"]) if c.get("score") is not None else 50.0
-        look, why = got if got is not None else (5, "")  # couldn't rate it: an average look, same scale as the rest
+        got = eyes.rate(frames, about(c)) if frames else None
         if got is not None:
-            c["look"], c["look_why"] = look, why
-            log(f"    looks {look}/10: {c.get('title') or ''} ({why})")
+            c["look"], c["look_why"] = got
+            log(f"    looks {got[0]}/10: {about(c)[:60]} ({got[1]})")
+
+
+def rerank(eyes: Eyes | None, clips: list[dict], src, want: int, log=print) -> list[dict]:
+    """Rate how each candidate looks and keep the best `want` (score: 75% what's said, 25% how it looks)."""
+    if not sees(eyes) or not clips:
+        return clips[:want]
+    _rate_all(eyes, src, clips, lambda c: c.get("title") or "", log)
+    for c in clips:
         c["score_said"] = c.get("score")
-        c["score"] = int(round(0.75 * said + 2.5 * look))
+        c["score"] = combined(c.get("score"), c.get("look"))
     kept = sorted(clips, key=lambda c: -(c.get("score") or 0))[:want]
-    dropped = [c for c in clips if c not in kept]
-    if dropped:
+    if len(kept) < len(clips):
         log(f"  kept the {len(kept)} best-looking of {len(clips)} candidates")
     return kept
 
 
 def ranker(eyes: Eyes | None, src, log=print):
-    """For picker.pick_clips: rates how each rough candidate looks and orders them by what's said and how it
-    looks, before the picker finalizes any (None without eyes)."""
-    if eyes is None:
+    """For picker.pick_clips and top.pick_top: rank(cands, progress) rates how each rough candidate looks and
+    orders them by what's said and how it looks, before any is finalized. None when the AI can't look."""
+    if not sees(eyes):
         return None
 
-    def rank(cands: list[dict]) -> list[dict]:
-        for c in cands:
-            s, e = float(c["start"]), float(c["end"])
-            frames = frames_at(src, [s + (e - s) * f for f in (0.12, 0.38, 0.62, 0.88)])
-            about = c.get("hook") or c.get("label") or ""
-            got = eyes.rate(frames, about) if frames else None
-            if got is not None:
-                c["look"], c["look_why"] = got
-                log(f"    looks {got[0]}/10: {about[:60]} ({got[1]})")
-        said = lambda c: float(c["score"]) if c.get("score") is not None else 50.0
-        out = sorted(cands, key=lambda c: -(0.75 * said(c) + 2.5 * (c["look"] if c.get("look") is not None else 5)))
+    def rank(cands: list[dict], progress=None) -> list[dict]:
+        _rate_all(eyes, src, cands, lambda c: c.get("hook") or c.get("label") or "", log, progress)
+        out = sorted(cands, key=lambda c: -combined(c.get("score"), c.get("look")))
         log(f"  rated how {len(cands)} candidates look; the best are finalized")
         return out
     return rank
@@ -246,6 +259,6 @@ def ranker(eyes: Eyes | None, src, log=print):
 
 def with_extra(cfg, eyes: Eyes | None):
     """Settings that ask the picker for a few more candidates when the AI can rate how they look."""
-    if eyes is None:
+    if not sees(eyes):
         return cfg
     return dataclasses.replace(cfg, clips=int(cfg.clips) + min(3, max(1, int(cfg.clips) // 2)))

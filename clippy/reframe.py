@@ -223,7 +223,7 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
     motion: dict[int, np.ndarray] = {}     # per sampled frame: how much moved per column (what's happening)
     thumbs: dict[int, np.ndarray] = {}     # about one frame a second, for the AI to look at
     every = max(1, round(fps))
-    portrait = W / H <= 9 / 16 + 0.02                # already vertical: nothing to ask about framing
+    portrait_src = W / H <= 9 / 16 + 0.02            # already vertical: nothing to frame, nothing to ask
     prev_hsv = prev_hist = prev_g = None
     n = 0
     for i, frame in enumerate(FrameStream(frame_reader(src, start, nframes, fps_str or f"{fps:.6f}", (aw, ah)), aw, ah)):
@@ -236,7 +236,7 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
             scores.append(float(np.mean(cv2.absdiff(hsv, prev_hsv))))
             corrs.append(float(cv2.compareHist(prev_hist, hist, cv2.HISTCMP_CORREL)))
         prev_hsv, prev_hist = hsv, hist
-        if eyes is not None and not portrait and i % every == every // 2:
+        if eyes is not None and not portrait_src and i % every == every // 2:
             thumbs[i] = frame.copy()
         if i % step == 0:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -262,7 +262,6 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
     nframes = max(1, n)
     cuts = detect_cuts(np.array(scores[:nframes]), np.array(corrs[:nframes]), fps) + [nframes]
 
-    portrait_src = W / H <= 9 / 16 + 0.02
     crop_w_full = min(W, H * 9 / 16)
     shots: list[Shot] = []
     cols: dict[int, np.ndarray] = {}       # per shot: where the detail and movement are, per column
@@ -334,7 +333,7 @@ def analyze(src: str, start: float, nframes: int, fps: float, W: int, H: int, sp
                 webcams[k] = same
     pending = {"shots": shots, "thumbs": thumbs, "fps": fps, "W": W, "H": H, "src": src, "start": start,
                "cols": cols, "webcams": webcams, "no_captions": no_captions,
-               "look": eyes is not None and bool(thumbs) and not portrait_src}
+               "look": eyes is not None and bool(thumbs)}       # (none kept for a vertical source)
     if look_later is not None:                 # plan() asks the AI once for all of a clip's parts
         look_later.append(pending)
     else:

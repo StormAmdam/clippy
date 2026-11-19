@@ -229,7 +229,7 @@ def pick_top(cfg: Settings, info: dict, transcript: dict, progress=lambda p, m: 
     scored.sort(key=lambda x: -x["score"])
     if rank is not None and scored:           # a funny moment has to look funny too
         k = n + 2
-        scored = rank(scored[:k]) + scored[k:]
+        scored = rank(scored[:k], lambda i, n: progress(0.7, f"AI is looking at how moment {i + 1}/{n} looks…")) + scored[k:]
     best: list[dict] = []
     for apart in (MIN_APART, 0.0):            # moments far apart first; neighbours only if there aren't enough
         for c in scored:

@@ -421,14 +421,15 @@ class LLM:
                 for j in images]
         body: dict = {"model": self.model or "default", "temperature": temperature, "max_tokens": max_tokens,
                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]}
+        schema_ok, kwargs_ok = self._schema_ok, self._kwargs_ok
         for attempt in range(3):
             b = dict(body)
-            if self._schema_ok:
+            if schema_ok:
                 b["response_format"] = {"type": "json_schema",
                                         "json_schema": {"name": "result", "schema": schema, "strict": True}}
             else:
                 b["response_format"] = {"type": "json_object"}
-            if self.local and self._kwargs_ok:
+            if self.local and kwargs_ok:
                 b["chat_template_kwargs"] = {"enable_thinking": bool(self.cfg.llm_thinking)}
             try:
                 r = httpx.post(self.base + "/chat/completions", headers=self.headers, json=b, timeout=1200)
@@ -439,15 +440,17 @@ class LLM:
                 continue
             if r.status_code in (400, 413, 422) and (len(user) > 2000 or images) and CONTEXT_ERROR.search(r.text):
                 raise ContextTooSmall(r.text[:300])
-            if images and r.status_code in (400, 413, 422):     # the pictures were refused: say so, and don't switch
-                raise RuntimeError(f"AI server error {r.status_code}: {r.text[:300]}")   # features off for later
-            if r.status_code == 400 and (self._schema_ok or self._kwargs_ok):
+            if r.status_code == 400 and (schema_ok or "chat_template_kwargs" in b):
                 # provider doesn't support json_schema or chat_template_kwargs → degrade gracefully
-                if self._kwargs_ok and "chat_template_kwargs" in b:
-                    self._kwargs_ok = False
+                if "chat_template_kwargs" in b:
+                    kwargs_ok = False
                 else:
-                    self._schema_ok = False
+                    schema_ok = False
+                if not images:                  # with pictures, the 400 may be about them: just for this request
+                    self._schema_ok, self._kwargs_ok = schema_ok, kwargs_ok
                 continue
+            if images and r.status_code in (400, 413, 422):     # the pictures were refused: say so
+                raise RuntimeError(f"AI server error {r.status_code}: {r.text[:300]}")
             if r.status_code == 429:
                 time.sleep(10 * (attempt + 1))
                 continue

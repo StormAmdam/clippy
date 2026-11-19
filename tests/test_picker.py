@@ -149,7 +149,7 @@ def test_with_eyes_only_the_kept_candidates_are_finalized(monkeypatch):
     monkeypatch.setattr(picker, "LLM", AI)
     looks = {"h0": 2, "h20": 9, "h40": 9, "h60": 3}
 
-    def rank(cands):
+    def rank(cands, progress=None):
         for c in cands:
             c["look"], c["look_why"] = looks.get(c["hook"], 5), "why"
         return sorted(cands, key=lambda c: -(0.75 * c["score"] + 2.5 * c["look"]))
