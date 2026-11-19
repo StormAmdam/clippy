@@ -1704,7 +1704,8 @@ pages.settings = async (el) => {
     const u = r.using;
     const others = r.servers.filter((s) => !u || s.base !== u.base);
     box.innerHTML = (u
-      ? `<div class="row" style="gap:10px"><span class="dot ok"></span><span>Using <b>${esc(u.model || "the loaded model")}</b> on ${esc(u.label)}${u.context ? `, ${u.context.toLocaleString()}-token context` : ""}</span></div>`
+      ? `<div class="row" style="gap:10px"><span class="dot ok"></span><span>Using <b>${esc(u.model || "the loaded model")}</b> on ${esc(u.label)}${u.context ? `, ${u.context.toLocaleString()}-token context` : ""}${u.vision ? ", and it can see images" : ""}</span></div>`
+        + (u.vision === false ? `<p class="small muted" style="margin:8px 0 0">It can't see images, so framing goes by faces and movement. For the AI to check the framing and how clips look, press Add Vision in AI &amp; Tools, or load the model's vision file (mmproj) in your AI app.</p>` : "")
       : `<div class="row" style="gap:10px;align-items:flex-start"><span class="dot bad" style="margin-top:7px"></span><span class="small">${esc(r.error)}</span></div>`)
       + others.map((s, i) => `<div class="row between" style="gap:10px;margin-top:10px"><span class="small"><b>${esc(s.label)}</b><br><span class="muted">${esc(s.models.slice(0, 4).join(", ") || "No chat models")}</span></span><button type="button" class="btn sm" data-use="${i}">Use This</button></div>`).join("")
       + `<div class="row" style="gap:8px;margin-top:12px">${r.auto ? "" : `<button type="button" class="btn sm quiet" id="aiAuto">Find Automatically</button>`}<button type="button" class="btn sm quiet" id="aiAgain">Look Again</button></div>`;

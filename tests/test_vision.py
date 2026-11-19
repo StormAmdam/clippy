@@ -334,3 +334,17 @@ def test_vision_never_starts_a_stopped_ai_when_it_isnt_needed(monkeypatch):
     monkeypatch.setattr(llm, "resolve", nothing)
     said = []
     assert vision.eyes_for(config.Settings(vision="auto"), log=said.append, start=False) is None and said == []
+
+
+def test_settings_says_whether_the_ai_can_see(tmp_path, monkeypatch, tmp_output):
+    from clippy import components, engine, server
+    monkeypatch.setattr(components, "LLM_DIR", tmp_path)
+    model = tmp_path / "Qwen3.5-4B-Q4_K_M.gguf"
+    model.write_bytes(b"m")
+    stopped = llm.Server("", "Built-in AI", [model.stem])
+    assert server._sees(config.load(), stopped) is False            # not loaded, no vision file: no
+    engine.vision_file(model).write_bytes(b"v")
+    assert server._sees(config.load(), stopped) is True             # its vision file is there: it will see
+    monkeypatch.setattr(llm.httpx, "get", lambda url, **k: httpx.Response(200, json={"modalities": {"vision": True}},
+                                                                          request=httpx.Request("GET", url)))
+    assert server._sees(config.load(), llm.Server("http://127.0.0.1:8080/v1", "llama.cpp", ["m"])) is True

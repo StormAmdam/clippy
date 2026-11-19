@@ -425,6 +425,21 @@ def status():
             "running": {k: running.get(k) for k in ("id", "kind", "url", "stage", "pct", "msg", "profile_id")} if running else None}
 
 
+def _sees(cfg, s) -> bool:
+    """Can the AI in use look at images (clippy/vision.py)? A built-in AI that isn't loaded: when its vision file is
+    there. Never starts or loads anything."""
+    from . import engine, llm
+    if s.kind == "Built-in AI" and not s.base:
+        m = engine.model_path(cfg)
+        return bool(m and engine.vision_file(m).exists())
+    try:
+        c = llm.LLM(cfg)
+        c._use(s)
+        return c.can_see()
+    except Exception:
+        return False
+
+
 @app.get("/api/ai")
 def ai_servers():
     """Every AI server Clippy can see right now, and the one (and model) it would use."""
@@ -435,7 +450,7 @@ def ai_servers():
     try:
         llm._cache.clear()
         s = llm.resolve(cfg)
-        using = {**s.to_dict(), "model": llm.choose_model(s, cfg.llm_model)}
+        using = {**s.to_dict(), "model": llm.choose_model(s, cfg.llm_model), "vision": _sees(cfg, s)}
         if all(f.base != s.base for f in found):
             found.insert(0, s)
     except RuntimeError as e:
