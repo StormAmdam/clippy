@@ -4,7 +4,7 @@
 
 #define AppVersion GetEnv("CLIPPY_VERSION")
 #if AppVersion == ""
-  #define AppVersion "0.3.1"
+  #define AppVersion "0.3.2"
 #endif
 
 [Setup]
