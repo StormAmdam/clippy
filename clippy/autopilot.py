@@ -32,6 +32,7 @@ PROFILE_DEFAULTS: dict = {
     "max_seconds": 60,
     "caption_style": "beast",
     "highlight_color": "#FFE135",
+    "preset": "",                       # a saved style (clippy/presets.py); when set, it decides the look
     "auto_every_hours": 0,         # 0 = only when you press Run
     "youtube": True,
     "tiktok": False,
@@ -217,9 +218,10 @@ def _run_profile(pid: str, run_pipeline, progress, log) -> dict:
         url = "https://www.youtube.com/watch?v=" + r["id"]
         log(f"  ▶ [{r['score']}] {r['title']}  ({r.get('channel')})")
         lo, span = 0.2 + 0.8 * vi / len(chosen), 0.8 / len(chosen)
+        look = {"preset": p["preset"]} if p.get("preset") else \
+            {"caption_style": p["caption_style"], "highlight_color": p["highlight_color"]}   # a saved style decides
         overrides = {"clips": p["clips_per_video"], "min_seconds": p["min_seconds"], "max_seconds": p["max_seconds"],
-                     "caption_style": p["caption_style"], "highlight_color": p["highlight_color"],
-                     "clips_dir": f"clips-{pid}"}
+                     **look, "clips_dir": f"clips-{pid}"}
         summary = run_pipeline(url, overrides,
                                on_progress=lambda st, f, m: progress("render", lo + span * f,
                                                                     f"Video {vi + 1}/{len(chosen)}: {m}"),

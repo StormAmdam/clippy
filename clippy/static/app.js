@@ -120,9 +120,37 @@ const nicheIcon = (n) => icon((NICHES[n] || ["film"])[0]);
 let STYLES = [["beast", "Beast", "Comic, bouncy, tilted", "/static/styles/beast.jpg"], ["hormozi", "Hormozi", "Bold, colored keywords", "/static/styles/hormozi.jpg"],
   ["box", "Box", "Highlight box", "/static/styles/box.jpg"], ["clean", "Clean", "Calm and minimal", "/static/styles/clean.jpg"]];
 let THEMES = [{id: "funny", name: "Funniest", emoji: "😂"}, {id: "crazy", name: "Craziest", emoji: "🤯"}, {id: "shocking", name: "Most shocking", emoji: "😱"}, {id: "wholesome", name: "Most wholesome", emoji: "🥹"}];
+let PRESETS = [];                                   // saved styles (clippy/presets.py)
+async function loadPresets() { try { PRESETS = (await api.get("/api/presets")).presets; } catch {} return PRESETS; }
+const presetOptions = (sel, none = "None") => `<option value="">${esc(none)}</option>${PRESETS.map((p) => `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""}>${esc(p.name)}</option>`).join("")}`;
 async function loadLooks() {
   try { STYLES = (await api.get("/api/styles")).map((x) => [x.id, x.name, x.about, x.preview || ""]); } catch {}
   try { THEMES = await api.get("/api/top-themes"); } catch {}
+  await loadPresets();
+}
+// name and save a style; saving under a name that exists updates that style
+function savePresetDialog(settings, name = "") {
+  return new Promise((resolve) => {
+    const bg = document.createElement("div");
+    bg.className = "modal-bg"; bg.dataset.confirm = "1";
+    bg.innerHTML = `<div class="modal small" role="dialog" aria-modal="true" aria-labelledby="psT">
+      <div class="mh"><h2 id="psT">Save as a style</h2></div>
+      <div class="mb"><p class="muted small" style="margin:6px 0 12px">Use it again in Make Clips, Find a Quote and Autopilot channels. A name you've used before updates that style.</p>
+        <div class="lbl"><label for="psName">Name</label></div><input class="input" id="psName" type="text" maxlength="40" autocomplete="off" placeholder="Podcast, Gaming…" value="${esc(name)}">
+        <p class="err-text small hidden" id="psErr" style="margin:8px 0 0"></p></div>
+      <div class="mf"><span class="grow"></span><button type="button" class="btn quiet" data-no>Cancel</button><button type="button" class="btn primary" data-yes>Save Style</button></div></div>`;
+    const done = (v) => { bg.remove(); document.removeEventListener("keydown", key, true); resolve(v); };
+    const key = (e) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); done(null); } else if (e.key === "Enter" && e.target.id === "psName") { e.preventDefault(); go(); } };
+    const go = async () => {
+      try { const pr = await api.post("/api/presets", {name: $("#psName", bg).value, settings}); await loadPresets(); toast(`Saved the style “${pr.name}”`); done(pr); }
+      catch (e) { $("#psErr", bg).textContent = e.message; $("#psErr", bg).classList.remove("hidden"); }
+    };
+    document.addEventListener("keydown", key, true);
+    $("[data-no]", bg).onclick = () => done(null);
+    $("[data-yes]", bg).onclick = go;
+    document.body.appendChild(bg);
+    $("#psName", bg).focus(); $("#psName", bg).select();
+  });
 }
 const stylePic = (pv, name) => pv ? `<img src="${esc(pv)}" alt="" width="360" height="640" loading="lazy">` : `<div class="nopic"><b>${esc(name)}</b></div>`;
 const COLORS = ["#ffe135", "#3dff7a", "#ff4fd8", "#3ad8ff", "#ff8a1f", "#ffffff"];
@@ -414,6 +442,9 @@ pages.make = async (el) => {
           <small class="hint" style="display:block;margin-top:8px">Each moment is 5–15 seconds, and the best one comes last. Extensions can add more kinds of countdown.</small></div>
       </section></div>
     <div class="sec"><div class="sec-head"><h2>Caption style</h2><span>How your captions look</span></div>
+      <div class="presetbar"><label for="mPreset">Saved style</label><select class="input" id="mPreset">${presetOptions(o.preset, "None, just these choices")}</select>
+        <button type="button" class="btn sm" id="mSavePreset">${icon("plus")} Save These as a Style</button>
+        <span class="small faint" id="mPresetNote"></span></div>
       <div class="styles" id="mStyles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d, pv]) => `<button type="button" role="radio" aria-checked="${o.caption_style === k}" class="style ${o.caption_style === k ? "on" : ""}" data-s="${esc(k)}">
         ${stylePic(pv, n)}<div><b>${esc(n)}</b><small>${esc(d)}</small></div></button>`).join("")}</div></div>
     <div class="sec grid g2">
@@ -439,7 +470,29 @@ pages.make = async (el) => {
     </div>
     <div class="sec hidden" id="mResWrap"><div class="sec-head"><h2 id="mResTitle">Your clips</h2><span id="mResSub" class="break"></span><button type="button" class="btn sm" id="mQuote">${icon("search")} Find a Quote</button></div><div class="clips" id="mRes"></div></div>`;
 
-  const save = () => store.set("make", o);
+  const LOOK = ["caption_style", "highlight_color", "title_seconds", "teaser", "sfx", "motion", "emojis", "progress_bar", "remove_silences", "split_screen", "punch_in"];
+  const changedFromPreset = () => {
+    const pr = PRESETS.find((x) => x.id === o.preset);
+    return pr && LOOK.some((k) => k in pr.settings && String(pr.settings[k]).toLowerCase() !== String(o[k]).toLowerCase());
+  };
+  const save = () => {
+    store.set("make", o);
+    if ($("#mPresetNote")) $("#mPresetNote").textContent = changedFromPreset() ? "Changed from the saved style. Save to keep the changes." : "";
+  };
+  if (o.preset && !PRESETS.some((x) => x.id === o.preset)) o.preset = "";      // deleted since
+  $("#mPreset").onchange = async (e) => {
+    o.preset = e.target.value;
+    const pr = PRESETS.find((x) => x.id === o.preset);
+    if (pr) for (const k of LOOK) if (k in pr.settings) o[k] = pr.settings[k];
+    store.set("make", o);
+    const y = scrollY; await route(); scrollTo(0, y);                          // every control shows the style
+    if (pr) toast(`Using the style “${pr.name}”`);
+  };
+  $("#mSavePreset").onclick = async () => {
+    const pr = await savePresetDialog(Object.fromEntries(LOOK.map((k) => [k, o[k]])), PRESETS.find((x) => x.id === o.preset)?.name || "");
+    if (pr) { o.preset = pr.id; store.set("make", o); const y = scrollY; await route(); scrollTo(0, y); }
+  };
+  save();
   if (!THEMES.some((t) => t.id === o.top_theme)) o.top_theme = "funny";        // its extension was removed
   $$("#mFormat .choice").forEach((b) => b.onclick = () => {
     o.format = b.dataset.v;
@@ -662,7 +715,7 @@ pages.find = async (el) => {
 
 // ═════════════════════════ AUTOPILOT ═════════════════════════
 const PROFILE_DEFAULTS = {name: "", language: "en", niches: [], keywords: "", window: "week", duration: "long", sources: [], source_mode: "safe",
-  caption_style: "beast", highlight_color: "#ffe135", videos_per_run: 1, clips_per_video: 3, min_seconds: 20, max_seconds: 60,
+  caption_style: "beast", highlight_color: "#ffe135", preset: "", videos_per_run: 1, clips_per_video: 3, min_seconds: 20, max_seconds: 60,
   auto_every_hours: 24, youtube: true, tiktok: false, privacy: "public", spacing_hours: 4, category_id: "24",
   description_template: "{caption}\n\n{hashtags} #Shorts\n\n🎥 Credit: {source_channel} — {source_url}", extra_hashtags: ""};
 const LENGTHS = [["short", "Short", "15–30 seconds", 15, 30], ["medium", "Medium", "20–60 seconds", 20, 60], ["long", "Long", "45–90 seconds", 45, 90]];
@@ -870,16 +923,19 @@ function openWizard(existing) {
       };
       $$("[data-rm]", b).forEach((x) => x.onclick = () => { p.sources.splice(+x.dataset.rm, 1); body(); });
     } else if (step === 3) {
-      b.innerHTML = `<p class="wz-q">How should the shorts look?</p><p class="wz-help">Pick a caption style. You can change it any time.</p>
-        <div class="styles" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d, pv]) => `<button type="button" role="radio" aria-checked="${p.caption_style === k}" class="style ${p.caption_style === k ? "on" : ""}" data-s="${esc(k)}">${stylePic(pv, n)}<div><b>${esc(n)}</b><small>${esc(d)}</small></div></button>`).join("")}</div>
+      b.innerHTML = `<p class="wz-q">How should the shorts look?</p><p class="wz-help">Pick a saved style, or a caption style and color. You can change it any time.</p>
+        ${PRESETS.length ? `<div class="presetbar" style="margin-bottom:16px"><label for="wzPreset">Saved style</label><select class="input" id="wzPreset">${presetOptions(p.preset, "None, pick below")}</select>
+          ${p.preset ? `<span class="small faint">The saved style decides the captions, color and effects.</span>` : ""}</div>` : ""}
+        <div class="styles ${p.preset ? "dimmed" : ""}" role="radiogroup" aria-label="Caption style">${STYLES.map(([k, n, d, pv]) => `<button type="button" role="radio" aria-checked="${!p.preset && p.caption_style === k}" class="style ${!p.preset && p.caption_style === k ? "on" : ""}" data-s="${esc(k)}">${stylePic(pv, n)}<div><b>${esc(n)}</b><small>${esc(d)}</small></div></button>`).join("")}</div>
         <div class="grid g2" style="margin-top:22px">
-          <div class="field"><span>Highlight color</span><div class="swatches">${COLORS.map((c) => `<button type="button" class="swatch ${p.highlight_color === c ? "on" : ""}" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join("")}</div></div>
+          <div class="field ${p.preset ? "dimmed" : ""}"><span>Highlight color</span><div class="swatches">${COLORS.map((c) => `<button type="button" class="swatch ${!p.preset && p.highlight_color === c ? "on" : ""}" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join("")}</div></div>
           <div class="field"><span>Shorts per run</span><div class="seg" id="wzClips">${[1, 2, 3, 5].map((n) => `<button type="button" data-v="${n}" class="${p.clips_per_video === n ? "on" : ""}">${n}</button>`).join("")}</div>
             <div class="hint">From the best new video each run</div></div>
         </div>
         <div class="field" style="margin-top:20px"><span>Short length</span><div class="choices">${LENGTHS.map(([k, n, d]) => choice(lenKey() === k, "", n, d, `data-len="${k}"`)).join("")}</div></div>`;
-      $$("[data-s]", b).forEach((c) => c.onclick = () => { p.caption_style = c.dataset.s; $$("[data-s]", b).forEach((x) => { x.classList.toggle("on", x === c); x.setAttribute("aria-checked", x === c); }); });
-      $$("[data-c]", b).forEach((c) => c.onclick = () => { p.highlight_color = c.dataset.c; $$("[data-c]", b).forEach((x) => x.classList.toggle("on", x === c)); });
+      $("#wzPreset", b)?.addEventListener("change", (e) => { p.preset = e.target.value; body(); });
+      $$("[data-s]", b).forEach((c) => c.onclick = () => { p.preset = ""; p.caption_style = c.dataset.s; body(); });
+      $$("[data-c]", b).forEach((c) => c.onclick = () => { p.preset = ""; p.highlight_color = c.dataset.c; body(); });
       $$("#wzClips button", b).forEach((x) => x.onclick = () => { p.clips_per_video = +x.dataset.v; $$("#wzClips button", b).forEach((y) => y.classList.toggle("on", y === x)); });
       $$("[data-len]", b).forEach((c) => c.onclick = () => { const l = LENGTHS.find((x) => x[0] === c.dataset.len); p.min_seconds = l[3]; p.max_seconds = l[4]; body(); });
     } else if (step === 4) {
@@ -914,7 +970,7 @@ function openWizard(existing) {
         ["calendar", "When", `<b>${everyLabel(p.auto_every_hours)}</b>${p.auto_every_hours ? ", while Clippy is running," : ""} a new run starts.`],
         ["search", "Find", `It searches ${p.niches.length ? `<b>${esc(p.niches.map(nicheLabel).join(", "))}</b>` : "your source channels"}${p.keywords ? ` plus “${esc(p.keywords)}”` : ""} in <b>${esc((LANGS.find((l) => l[0] === p.language) || ["", "any language"])[1])}</b>${p.sources.length ? `, and always checks <b>${p.sources.length} source channel${p.sources.length > 1 ? "s" : ""}</b>` : ""}.`],
         ["shield", "Sources", p.source_mode === "safe" ? "<b>Safe mode:</b> only your source channels and Creative Commons videos. Credit goes in every description." : "<b>Any video.</b> Make sure you have the rights."],
-        ["film", "Make", `It picks the best new video and makes <b>${p.clips_per_video} short${p.clips_per_video > 1 ? "s" : ""}</b> (${len ? len[2] : `${p.min_seconds}–${p.max_seconds} seconds`}) in the <b>${esc(STYLES.find((s) => s[0] === p.caption_style)?.[1] || p.caption_style)}</b> style.`],
+        ["film", "Make", `It picks the best new video and makes <b>${p.clips_per_video} short${p.clips_per_video > 1 ? "s" : ""}</b> (${len ? len[2] : `${p.min_seconds}–${p.max_seconds} seconds`}) in the <b>${esc(PRESETS.find((x) => x.id === p.preset)?.name || STYLES.find((s) => s[0] === p.caption_style)?.[1] || p.caption_style)}</b> style.`],
         ["checkCircle", "You", "They wait in <b>Review</b> until you approve them. Nothing is posted without you."],
         ["upload", "Publish", `Approved shorts go to <b>${esc(where)}</b>${p.youtube ? (p.spacing_hours ? `, one every <b>${p.spacing_hours} hours</b>` : ", <b>right away</b>") : ""}.`],
       ];
@@ -1199,7 +1255,7 @@ async function openQuickFix(file, {after = () => {}} = {}) {
 async function openQuote(video, {after = () => {}} = {}) {
   let d;
   try { d = await api.get(`/api/transcript/${encodeURIComponent(video)}`); } catch (e) { fail(e); return; }
-  const st = {first: null, last: null, q: "", title: "", typed: false, busy: false};
+  const st = {first: null, last: null, q: "", title: "", typed: false, busy: false, preset: store.get("make", {}).preset || ""};
   const canMake = !!d.source || d.redownload;
   const m = openModal(`<div class="mh"><div class="row between"><h2>Find a Quote</h2><button type="button" class="btn quiet icon" data-close aria-label="Close">${icon("x")}</button></div>
       <p class="muted small break" style="margin:4px 0 0">${esc(d.title)}. Search what's said, pick the first and last line, and Clippy makes it a short with the usual captions and framing.</p></div>
@@ -1251,9 +1307,11 @@ async function openQuote(video, {after = () => {}} = {}) {
       <p class="small muted break" style="margin:6px 0 0">“${esc(a.text.length > 90 ? a.text.slice(0, 90) + "…" : a.text)}”${r[1] > r[0] ? ` … “${esc(b.text.length > 70 ? "…" + b.text.slice(-70) : b.text)}”` : ""}</p>
       ${d.source ? `<button type="button" class="btn sm" id="qqPlay" style="margin-top:10px">${icon("play")} Play It</button>` : ""}
       <div style="margin-top:12px"><div class="lbl"><label for="qqTitle">Title on the short</label></div><input class="input" id="qqTitle" type="text" maxlength="100" autocomplete="off" value="${esc(st.title)}"></div>
+      ${PRESETS.length ? `<div style="margin-top:10px"><div class="lbl"><label for="qqPreset">Style</label></div><select class="input" id="qqPreset">${presetOptions(st.preset, "Your settings")}</select></div>` : ""}
       ${bad ? `<p class="err-text small" style="margin:8px 0 0">${bad}</p>` : ""}</div>`;
     $("#qqPlay", m)?.addEventListener("click", () => play(a.s, b.e + 0.3));
     $("#qqTitle", m).oninput = (e) => { st.title = e.target.value; st.typed = true; };
+    $("#qqPreset", m)?.addEventListener("change", (e) => { st.preset = e.target.value; });
     if (!st.busy) { $("#qqGo", m).disabled = !!bad || !canMake; $("#qqStatus", m).textContent = bad ? "" : "Ready to make"; }
   };
   // a search finds one end; the other end rarely has the same word, so show every line again around the pick
@@ -1274,7 +1332,7 @@ async function openQuote(video, {after = () => {}} = {}) {
     st.busy = true; $("#qqGo", m).disabled = true;
     $("#qqStatus", m).innerHTML = `<div class="bar wait"><i style="width:0%"></i></div><span class="faint">Waiting in line…</span>`;
     let job;
-    try { job = await api.post(`/api/transcript/${encodeURIComponent(video)}/clip`, {i0: d.lines[r[0]].i0, i1: d.lines[r[1]].i1, title: st.title.trim()}); }
+    try { job = await api.post(`/api/transcript/${encodeURIComponent(video)}/clip`, {i0: d.lines[r[0]].i0, i1: d.lines[r[1]].i1, title: st.title.trim(), preset: st.preset}); }
     catch (e) { st.busy = false; summary(); $("#qqStatus", m).innerHTML = `<span class="err-text">${esc(e.message)}</span>`; return; }
     const t = setInterval(async () => {
       let j; try { j = await api.get("/api/jobs/" + job.id); } catch { return; }
@@ -1536,6 +1594,9 @@ pages.settings = async (el) => {
       <div class="set"><div><b>Theme</b><p>How Clippy looks. It changes straight away, here and in every window.</p></div>
         <div class="choices wide" id="sTheme" role="radiogroup" aria-label="Theme">${UI_THEMES.map(([v, n, d]) => `<button type="button" role="radio" aria-checked="${(s.ui_theme || "caption") === v}"
           class="choice ${(s.ui_theme || "caption") === v ? "on" : ""}" data-theme="${v}"><span class="tick" style="z-index:1">${icon("check")}</span>${themeSample(v)}<b>${n}</b><small>${d}</small></button>`).join("")}</div></div>
+      <div class="set"><div><b>Saved styles</b><p>Named looks for Make Clips, Find a Quote and Autopilot channels. Save one from Make Clips.</p></div>
+        <div id="sPresets">${PRESETS.length ? `<div class="rows">${PRESETS.map((pr) => `<div class="rowi"><div class="t"><b>${esc(pr.name)}</b><small>${esc(STYLES.find((x) => x[0] === pr.settings.caption_style)?.[1] || pr.settings.caption_style)} captions, ${pr.settings.teaser ? "teaser" : "no teaser"}, ${pr.settings.sfx ? "sound effects" : "no sound effects"}</small></div>
+          <button type="button" class="btn sm quiet danger" data-delpreset="${esc(pr.id)}" data-name="${esc(pr.name)}">${icon("trash")} Delete</button></div>`).join("")}</div>` : `<p class="muted">None yet.</p>`}</div></div>
       <div class="set"><div><b>Updates</b><p id="sVersion">You have Clippy ${esc(state.version || "")}.</p></div>
         <div class="stack"><label class="switch"><span class="ic">${icon("refresh")}</span><span class="txt"><b>Check for updates when Clippy opens</b><small>It asks GitHub for a newer version and tells you. It never updates without you.</small></span><input type="checkbox" data-k="check_updates" ${s.check_updates ? "checked" : ""}></label>
           <div class="row"><button type="button" class="btn sm" id="sCheck">${icon("refresh")} Check Now</button><span class="small muted" id="sCheckNote"></span></div></div></div>
@@ -1614,6 +1675,10 @@ pages.settings = async (el) => {
     toast(`Theme: ${UI_THEMES.find((t) => t[0] === v)[1]}`);
   });
   api.get("/api/update").then((u) => { state.version = u.current; $("#sVersion") && ($("#sVersion").textContent = `You have Clippy ${u.current}.`); }).catch(() => {});
+  $$("[data-delpreset]").forEach((b) => b.onclick = async () => {
+    if (!await confirmDialog({title: `Delete the style “${b.dataset.name}”?`, body: "Shorts already made keep their look. Autopilot channels using it go back to their own caption style.", confirm: "Delete Style", danger: true})) return;
+    try { await api.del(`/api/presets/${encodeURIComponent(b.dataset.delpreset)}`); await loadPresets(); toast("Style deleted"); route(); } catch (e) { fail(e); }
+  });
   $("#sCheck").onclick = async () => {
     $("#sCheck").disabled = true; $("#sCheckNote").textContent = "Checking…";
     const u = await checkForUpdate(true);

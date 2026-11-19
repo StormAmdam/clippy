@@ -352,7 +352,8 @@ def make_clip(video: str, i0: int, i1: int, title: str = "", overrides: dict | N
     title = re.sub(r"\s+", " ", title or "").strip()[:100] or " ".join(w["w"] for w in words[i0:i0 + 6]).strip(" ,.")
     vinfo = _read(d / "info.json", {}) or {}
     result = _read(d / "result.json", {}) or {}
-    made_with = {**(overrides or {}), "clips_dir": MINE}
+    from . import presets
+    made_with = {**presets.expand(overrides), "clips_dir": MINE}       # a saved style, if one was chosen
     src, base = _ensure_source(d, vinfo, result, made_with, progress, log, "a clip can't be made from it")
     out_dir = d / MINE
     out_dir.mkdir(exist_ok=True)

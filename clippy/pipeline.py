@@ -60,6 +60,8 @@ def render_settings(cfg, visual: bool, countdown: bool):
 
 def run(url: str, overrides: dict | None = None, on_progress=lambda stage, pct, msg: None, log=print,
         on_info=None) -> dict:
+    from . import presets
+    overrides = presets.expand(overrides)               # a saved style: its settings, then the job's own
     cfg = config.load(overrides)
     local = Path(url.strip()).expanduser().exists()
     if not local and _looks_like_a_file(url.strip()):

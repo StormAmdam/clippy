@@ -553,3 +553,9 @@ details.more > div { padding: 0 14px 14px; }
 #qqStatus .bar { margin-bottom: 4px; max-width: 260px; }
 @media (max-width: 720px) { .qq { grid-template-columns: 1fr; } .qq-side { position: static; } .qq-lines { max-height: none; }
   .modal .mf:has(#qqStatus) { flex-wrap: wrap; } #qqStatus { flex-basis: 100%; } }
+
+/* saved styles: the picker above a page's look controls */
+.presetbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.presetbar label { font-weight: 700; font-size: 14px; color: var(--dim); }
+.presetbar select.input { width: auto; min-width: 220px; max-width: 100%; }
+.styles.dimmed, .field.dimmed { opacity: .45; }

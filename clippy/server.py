@@ -122,7 +122,7 @@ def _worker():
 ALLOWED = {"clips", "min_seconds", "max_seconds", "highlight_color", "title_seconds", "remove_silences",
            "split_screen", "punch_in", "reuse_picks", "words_per_caption", "caption_y", "caption_style",
            "caption_scale", "sfx", "sfx_volume", "motion", "teaser", "emojis", "progress_bar", "speech",
-           "format", "top_theme", "top_count", "top_min", "top_max"}
+           "format", "top_theme", "top_count", "top_min", "top_max", "preset"}
 
 
 @app.post("/api/jobs")
@@ -169,6 +169,35 @@ class QuoteIn(BaseModel):
     i0: int
     i1: int
     title: str = ""
+    preset: str = ""
+
+
+class PresetIn(BaseModel):
+    name: str
+    settings: dict = {}
+    id: str | None = None
+
+
+@app.get("/api/presets")
+def presets_list():
+    from . import presets
+    return {"presets": presets.list_presets(), "keys": list(presets.KEYS)}
+
+
+@app.post("/api/presets")
+def preset_save(body: PresetIn):
+    from . import presets
+    try:
+        return presets.save(body.name, body.settings, body.id)
+    except presets.PresetError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/presets/{pid}")
+def preset_delete(pid: str):
+    from . import presets
+    presets.delete(pid)
+    return {"ok": True}
 
 
 @app.get("/api/transcript/{video}")
@@ -189,7 +218,8 @@ def transcript_clip(video: str, body: QuoteIn):
     except quickfix.FixError as e:
         raise HTTPException(400, str(e))
     job = _new_job(kind="manual", url=video, title=body.title,
-                   options={"i0": body.i0, "i1": body.i1, "title": body.title})
+                   options={"i0": body.i0, "i1": body.i1, "title": body.title,
+                            "overrides": {"preset": body.preset} if body.preset else {}})
     return {"id": job["id"]}
 
 
