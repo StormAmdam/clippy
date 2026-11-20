@@ -5,11 +5,15 @@
 # Clippy
 
 Turn long videos into ready-to-post vertical shorts, on your own PC.<br>
-Local AI picks the moments, then Clippy reframes, captions and edits them. No subscriptions, no API bills.
+Local AI picks the moments, then Clippy reframes, captions and edits them.<br>
+Free and open source, for Windows and Linux. No subscriptions, no API bills.
+
+<a href="https://github.com/StormAmdam/clippy/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20Windows-ffe135?style=for-the-badge" alt="Download for Windows"></a>
+<a href="#linux"><img src="https://img.shields.io/badge/Install%20on%20Linux-232429?style=for-the-badge" alt="Install on Linux"></a>
 
 [![tests](https://github.com/StormAmdam/clippy/actions/workflows/tests.yml/badge.svg)](https://github.com/StormAmdam/clippy/actions/workflows/tests.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-ffe135?labelColor=232429)](LICENSE)
-[![Linux](https://img.shields.io/badge/runs%20on-Linux%20%2F%20WSL2-ffe135?labelColor=232429)](#requirements)
+[![Windows and Linux](https://img.shields.io/badge/runs%20on-Windows%20%7C%20Linux-ffe135?labelColor=232429)](#requirements)
 
 </div>
 
@@ -77,7 +81,7 @@ and save shorts from the couch. The phone gets a separate, limited page: it can'
 
 ### Windows
 
-1. Download **Clippy-Setup-win64.exe** from the [latest release](https://github.com/StormAmdam/clippy/releases/latest)
+1. Download **Clippy-Setup-x.y.z-win64.exe** (x.y.z is the version) from the [latest release](https://github.com/StormAmdam/clippy/releases/latest)
    and run it. No admin rights needed. (Prefer no installer? The portable zip works from any folder.)
    Windows may say **"Windows protected your PC"** because the installer isn't code-signed yet: click
    **More info**, then **Run anyway**. ([Why](docs/code-signing.md).)
